@@ -1,0 +1,118 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String
+  role         String    @default("CLIENT") // CLIENT | ADVERTISER | ADMIN
+  createdAt    DateTime  @default(now())
+  sessions     Session[]
+  profile      Profile?
+  reviews      Review[]
+  reports      Report[]
+}
+
+model Session {
+  id        String   @id // sha256 del token; el token solo vive en la cookie
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+}
+
+model Profile {
+  id                 String         @id @default(cuid())
+  userId             String         @unique
+  user               User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  slug               String         @unique
+  displayName        String
+  age                Int
+  city               String
+  zone               String         @default("")
+  category           String
+  description        String
+  priceFrom          Int
+  whatsapp           String
+  status             String         @default("DRAFT") // DRAFT | ACTIVE | PAUSED | REVIEW | SUSPENDED
+  verifyCode         String
+  // Códigos de región donde el perfil NO se muestra, con comas a ambos lados: ",ANT,EXT,"
+  blockedRegions     String         @default("")
+  identityVerifiedAt DateTime?
+  photosVerifiedAt   DateTime?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+  photos             Photo[]
+  verifications      Verification[]
+  reviewCodes        ReviewCode[]
+  reviews            Review[]
+  reports            Report[]
+
+  @@index([city, category, status])
+}
+
+model Photo {
+  id        String   @id @default(cuid())
+  profileId String
+  profile   Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  file      String
+  status    String   @default("PENDING") // PENDING | APPROVED | REJECTED
+  createdAt DateTime @default(now())
+}
+
+model Verification {
+  id         String    @id @default(cuid())
+  profileId  String
+  profile    Profile   @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  code       String
+  docFile    String? // se elimina del disco al resolver la solicitud
+  selfieFile String? // se conserva (privada) como referencia para aprobar fotos futuras
+  status     String    @default("PENDING") // PENDING | APPROVED | REJECTED
+  note       String    @default("")
+  createdAt  DateTime  @default(now())
+  reviewedAt DateTime?
+}
+
+model ReviewCode {
+  id        String    @id @default(cuid())
+  profileId String
+  profile   Profile   @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  code      String    @unique
+  createdAt DateTime  @default(now())
+  expiresAt DateTime
+  usedAt    DateTime?
+  review    Review?
+}
+
+model Review {
+  id           String     @id @default(cuid())
+  profileId    String
+  profile      Profile    @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  authorId     String
+  author       User       @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  codeId       String     @unique
+  code         ReviewCode @relation(fields: [codeId], references: [id])
+  rating       Int
+  photosMatch  Boolean
+  askedDeposit Boolean
+  body         String
+  status       String     @default("VISIBLE") // VISIBLE | HIDDEN
+  createdAt    DateTime   @default(now())
+}
+
+model Report {
+  id         String   @id @default(cuid())
+  profileId  String
+  profile    Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  reporterId String?
+  reporter   User?    @relation(fields: [reporterId], references: [id], onDelete: SetNull)
+  reason     String
+  details    String
+  status     String   @default("OPEN") // OPEN | RESOLVED | DISMISSED
+  createdAt  DateTime @default(now())
+}

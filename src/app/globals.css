@@ -1,0 +1,30 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ink: #120d18;
+  --color-panel: #1c1524;
+  --color-line: #34283f;
+  --color-mute: #a99db5;
+  --color-rose: #f0527f;
+  --color-ok: #34d399;
+  --color-warn: #fbbf24;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+body { @apply bg-ink text-zinc-100 antialiased; }
+h1, h2, h3 { text-wrap: balance; }
+
+@layer components {
+  .container-page { @apply mx-auto w-full max-w-6xl px-4; }
+  .card { @apply rounded-2xl border border-line bg-panel p-5; }
+  .btn { @apply inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-line px-4 py-2 text-sm font-semibold transition hover:border-mute disabled:cursor-not-allowed disabled:opacity-50; }
+  .btn-primary { @apply border-rose bg-rose text-white hover:border-rose hover:brightness-110; }
+  .btn-ok { @apply border-ok bg-ok text-ink hover:border-ok hover:brightness-110; }
+  .input { @apply w-full rounded-xl border border-line bg-ink px-3 py-2 text-sm text-zinc-100 placeholder:text-mute/60 focus:border-rose focus:outline-none; }
+  .label { @apply mb-1 block text-xs font-semibold tracking-wide text-mute uppercase; }
+  .badge { @apply inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-semibold whitespace-nowrap; }
+  .badge-ok { @apply border-ok/40 bg-ok/10 text-ok; }
+  .badge-warn { @apply border-warn/40 bg-warn/10 text-warn; }
+  .badge-mute { @apply border-line text-mute; }
+  .h-section { @apply text-lg font-bold; }
+}
