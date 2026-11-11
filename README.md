@@ -9,8 +9,9 @@ trans) para adultos, construida alrededor de dos necesidades: **privacidad** par
 ## Qué la hace distinta
 
 ### Encuentros verificados (reseñas imposibles de inventar)
-1. Durante el encuentro, la anunciante genera un **código QR presencial** de un solo uso (15 min).
-2. El cliente lo confirma desde su cuenta: queda registrado un encuentro con un **sello público** (`ENC-…`).
+1. Durante el encuentro, la anunciante genera un **PIN de 4 dígitos** (y un QR) de un solo uso, válido 15 min.
+2. El cliente lo escribe en el perfil de ella desde su cuenta. El PIN solo vale en ese perfil y se anula al quinto intento fallido.
+   Con eso queda registrado un encuentro con un **sello público** (`ENC-…`).
 3. **Ambos se califican a ciegas**: nada se publica hasta que los dos califican, o pasan 7 días.
 4. Cualquiera puede comprobar el sello en `/verificar` sin que se revele la identidad de nadie.
 
@@ -22,6 +23,8 @@ calificación y el sello siempre son visibles.
 - Buscador y filtros que se aplican solos: ciudad, categoría, servicio, lugar, edad, tarifa, disponibles ahora, fotos verificadas, solo independientes.
 - **Mensaje de WhatsApp ya armado**: el cliente elige servicio, adicionales (configurados por la anunciante, con precio), lugar y horario.
 - **Calificación por servicio**: cada reseña verificada califica solo los servicios tomados.
+- **Filtros por apariencia y estilo** (tatuada, gótica, bajita, alta, cabello, personalidad) combinables.
+- **Favoritas con aviso**: «Avísame cuando esté disponible»; la cuenta y el encabezado muestran cuáles lo están (aviso dentro del sitio; notificaciones push aún no).
 - **Historias** de 24 horas, como en una red social, para ver quién está activa hoy.
 
 ### Independientes, agencias y estafas
@@ -29,6 +32,7 @@ calificación y el sello siempre son visibles.
 - Detección automática: bloquea anuncios que piden dinero por adelantado, impide repetir un número de WhatsApp en dos perfiles y avisa a moderación cuando una foto coincide con la de otro perfil (huella perceptual).
 
 ### Privacidad para quien anuncia
+- **Contacto con solicitud**: el número queda oculto; ella recibe la solicitud armada junto con la reputación del cliente y decide a quién mostrárselo (48 h).
 - **Modo discreto**: sin cuenta, las fotos se sirven difuminadas desde el servidor y el contacto queda oculto. El perfil no se envía a buscadores.
 - **Bloqueo por ubicación**: por departamento o «fuera de Colombia»; aplica a listados, perfil, fotos, contacto y sellos.
 - **Solo visitantes extranjeros**: visible si la conexión es de otro país o el navegador no está en español (indicios, no garantía).
@@ -77,7 +81,7 @@ cabeceras de geolocalización: pon Cloudflare delante para que funcione el bloqu
 - `prisma/schema.prisma`: modelo de datos. `src/app/actions/`: toda la lógica de escritura, con validación y permisos.
 - `src/lib/`: confianza (`trust`), disponibilidad (`availability`), bloqueo por región (`geo`, `regions`), archivos privados (`storage`).
 - `src/app/panel`: cuenta de anunciante y de cliente. `src/app/admin`: moderación. `src/app/e`: confirmación de encuentro.
-- `src/app/prepagos/[ciudad]`, `sitemap.ts`, `robots.ts`: base de SEO.
+- `src/app/prepagos/[ciudad]` y `[ciudad]/[filtro]` (ciudad + palabra clave, ver `src/lib/landing.ts`), `sitemap.ts`, `robots.ts`: base de SEO.
 - Interfaz: Tailwind 4, Motion (animaciones), Fraunces + Geist, iconos Lucide.
 
 ## Marco legal del diseño

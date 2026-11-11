@@ -10,6 +10,7 @@ import { RATE_WINDOW_DAYS, randomCode, slugify } from '@/lib/profiles'
 import { REGIONS } from '@/lib/regions'
 import { depositLanguage } from '@/lib/scam'
 import { SERVICES, toList } from '@/lib/services'
+import { isTag } from '@/lib/tags'
 import { deleteImage, saveImage, savePhoto } from '@/lib/storage'
 
 const profileSchema = z.object({
@@ -48,6 +49,7 @@ export async function saveProfile(_: ActionState, fd: FormData): Promise<ActionS
     ...parsed.data,
     kind: fd.get('kind') === 'AGENCY' ? 'AGENCY' : 'INDEPENDENT',
     services: toList(fd.getAll('service').map(String).filter((k) => SERVICES.some((x) => x.key === k))),
+    tags: toList(fd.getAll('tag').map(String).filter(isTag).slice(0, 8)),
     extras: JSON.stringify(extras),
     incall: fd.get('incall') === 'on',
     outcall: fd.get('outcall') === 'on',
@@ -74,7 +76,7 @@ export async function savePrivacy(_: ActionState, fd: FormData): Promise<ActionS
   const blocked = fd.getAll('blocked').filter((c) => REGIONS.some((r) => r.code === c))
   await db.profile.update({
     where: { id: profile.id },
-    data: { discreet: fd.get('discreet') === 'on', foreignersOnly: fd.get('foreignersOnly') === 'on', blockedRegions: blocked.length ? `,${blocked.join(',')},` : '' },
+    data: { contactMode: fd.get('contactMode') === 'REQUEST' ? 'REQUEST' : 'DIRECT', discreet: fd.get('discreet') === 'on', foreignersOnly: fd.get('foreignersOnly') === 'on', blockedRegions: blocked.length ? `,${blocked.join(',')},` : '' },
   })
   revalidatePath('/panel')
   return { ok: 'Privacidad actualizada. Aplica de inmediato.' }
@@ -189,7 +191,8 @@ export async function openEncounter() {
   await db.encounter.create({
     data: {
       profileId: profile.id,
-      code: randomCode(6),
+      code: randomCode(12),
+      pin: String(crypto.getRandomValues(new Uint32Array(1))[0] % 10000).padStart(4, '0'),
       publicId: `ENC-${randomCode(7)}`,
       expiresAt: new Date(now.getTime() + 15 * 60_000),
     },
@@ -217,4 +220,14 @@ export async function rateClient(encounterId: string, _: ActionState, fd: FormDa
     },
   })
   redirect('/panel?calificado=1')
+}
+
+export async function decideRequest(requestId: string, accept: boolean) {
+  const { profile } = await ownProfile()
+  if (!profile) return
+  await db.contactRequest.updateMany({
+    where: { id: requestId, profileId: profile.id, status: 'PENDING' },
+    data: { status: accept ? 'ACCEPTED' : 'DECLINED', decidedAt: new Date() },
+  })
+  revalidatePath('/panel')
 }

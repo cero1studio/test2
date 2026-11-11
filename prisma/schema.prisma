@@ -20,6 +20,8 @@ model User {
   reviews      Review[]
   ratings      ClientRating[]
   reports      Report[]
+  favorites    Favorite[]
+  requests     ContactRequest[]
 }
 
 model Session {
@@ -46,6 +48,8 @@ model Profile {
   verifyCode         String
   kind               String         @default("INDEPENDENT") // INDEPENDENT | AGENCY
   services           String         @default("") // ",masaje,cena,"
+  tags               String         @default("") // apariencia y estilo: ",tatuajes,alta,"
+  contactMode        String         @default("DIRECT") // DIRECT | REQUEST (número oculto hasta aceptar)
   extras             String         @default("[]") // JSON: [{ label, price }] adicionales configurables
   incall             Boolean        @default(false) // atiende en lugar propio
   outcall            Boolean        @default(false) // atiende a domicilio u hotel
@@ -69,6 +73,8 @@ model Profile {
   reviews            Review[]
   clientRatings      ClientRating[]
   reports            Report[]
+  favorites          Favorite[]
+  requests           ContactRequest[]
 
   @@index([city, category, status])
 }
@@ -104,7 +110,9 @@ model Verification {
 model Encounter {
   id           String        @id @default(cuid())
   publicId     String        @unique // sello verificable públicamente, sin identidades
-  code         String        @unique // código presencial de un solo uso
+  code         String        @unique // ficha larga para el enlace del QR
+  pin          String        @default("") // PIN de 4 dígitos, válido solo dentro del perfil que lo generó
+  attempts     Int           @default(0) // intentos fallidos; al quinto el PIN se anula
   profileId    String
   profile      Profile       @relation(fields: [profileId], references: [id], onDelete: Cascade)
   clientId     String?
@@ -162,4 +170,32 @@ model Report {
   details    String
   status     String   @default("OPEN") // OPEN | RESOLVED | DISMISSED
   createdAt  DateTime @default(now())
+}
+
+// «Avísame cuando esté disponible»
+model Favorite {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  profileId String
+  profile   Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, profileId])
+}
+
+// Solicitud de contacto: el número de la anunciante se entrega solo si ella acepta.
+model ContactRequest {
+  id        String    @id @default(cuid())
+  profileId String
+  profile   Profile   @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  clientId  String
+  client    User      @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  message   String
+  status    String    @default("PENDING") // PENDING | ACCEPTED | DECLINED
+  createdAt DateTime  @default(now())
+  decidedAt DateTime?
+
+  @@index([profileId, status])
+  @@index([clientId, createdAt])
 }

@@ -9,11 +9,15 @@ import { db } from '@/lib/db'
 import { viewer } from '@/lib/geo'
 import { cardInclude, trustOf, visibleWhere } from '@/lib/profiles'
 import { SERVICES } from '@/lib/services'
+import { isTag, TAGS } from '@/lib/tags'
 
 export type ListingQuery = {
   q?: string; ciudad?: string; categoria?: string; servicio?: string; lugar?: string; edad?: string; max?: string
-  fotos?: string; ahora?: string; indep?: string; orden?: string
+  fotos?: string; ahora?: string; indep?: string; orden?: string; tag?: string | string[]
 }
+
+/** Filtros fijados por la URL de una página de aterrizaje (ciudad, categoría, etiqueta o servicio). */
+export type FixedFilters = { city?: string; category?: string; tag?: string; service?: string }
 
 const AGES: Record<string, [number, number]> = { '18-24': [18, 24], '25-29': [25, 29], '30-39': [30, 39], '40+': [40, 99] }
 const Pill = ({ name, label, on }: { name: string; label: string; on: boolean }) => (
@@ -22,8 +26,11 @@ const Pill = ({ name, label, on }: { name: string; label: string; on: boolean })
   </label>
 )
 
-export async function Listing({ q, fixedCity, action }: { q: ListingQuery; fixedCity?: string; action: string }) {
-  const city = fixedCity ?? q.ciudad
+export async function Listing({ q, fixed = {}, action }: { q: ListingQuery; fixed?: FixedFilters; action: string }) {
+  const city = fixed.city ?? q.ciudad
+  const category = fixed.category ?? q.categoria
+  const service = fixed.service ?? q.servicio
+  const tags = [...new Set([fixed.tag, ...[q.tag ?? []].flat()].filter(isTag))].slice(0, 6)
   const max = Number(q.max) || undefined
   const age = AGES[q.edad ?? '']
   const text = q.q?.trim().slice(0, 60)
@@ -32,8 +39,8 @@ export async function Listing({ q, fixedCity, action }: { q: ListingQuery; fixed
       where: {
         ...visibleWhere(await viewer()),
         ...(CITIES.includes(city as never) && { city }),
-        ...(CATEGORIES.includes(q.categoria as never) && { category: q.categoria }),
-        ...(SERVICES.some((s) => s.key === q.servicio) && { services: { contains: `,${q.servicio},` } }),
+        ...(CATEGORIES.includes(category as never) && { category }),
+        ...(SERVICES.some((s) => s.key === service) && { services: { contains: `,${service},` } }),
         ...(q.lugar === 'propio' && { incall: true }),
         ...(q.lugar === 'domicilio' && { outcall: true }),
         ...(age && { age: { gte: age[0], lte: age[1] } }),
@@ -41,7 +48,10 @@ export async function Listing({ q, fixedCity, action }: { q: ListingQuery; fixed
         ...(q.ahora === '1' && { availableUntil: { gt: new Date() } }),
         ...(q.indep === '1' && { kind: 'INDEPENDENT' }),
         ...(max && { priceFrom: { lte: max } }),
-        ...(text && { AND: [{ OR: [{ displayName: { contains: text } }, { zone: { contains: text } }, { description: { contains: text } }] }] }),
+        AND: [
+          ...tags.map((t) => ({ tags: { contains: `,${t},` } })),
+          ...(text ? [{ OR: [{ displayName: { contains: text } }, { zone: { contains: text } }, { description: { contains: text } }] }] : []),
+        ],
       },
       include: cardInclude(),
       take: 300,
@@ -53,7 +63,7 @@ export async function Listing({ q, fixedCity, action }: { q: ListingQuery; fixed
     .map((p) => ({ p, s: trustOf(p).score, a: Number(isAvailableNow(p)) }))
     .sort((x, y) => (q.orden === 'precio' ? x.p.priceFrom - y.p.priceFrom : q.orden === 'resenas' ? y.p.reviews.length - x.p.reviews.length : y.a - x.a || y.s - x.s))
   const live = sorted.filter((x) => x.a).length
-  const filtered = Object.entries(q).some(([k, v]) => v && k !== 'orden')
+  const filtered = Object.entries(q).some(([k, v]) => v && v.length > 0 && k !== 'orden')
 
   return (
     <div className="space-y-6">
@@ -70,18 +80,32 @@ export async function Listing({ q, fixedCity, action }: { q: ListingQuery; fixed
           <Pill name="fotos" label="Fotos verificadas" on={q.fotos === '1'} />
           <Pill name="indep" label="Solo independientes" on={q.indep === '1'} />
         </div>
+        <details className="group" open={tags.length > 0}>
+          <summary className="cursor-pointer text-xs font-semibold tracking-[0.12em] text-mute uppercase hover:text-cream">Apariencia y estilo{tags.length > 0 && ` · ${tags.length}`}</summary>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {TAGS.filter((t) => t.key !== fixed.tag).map((t) => (
+              <label key={t.key} className="cursor-pointer rounded-full border border-white/10 px-3 py-1.5 text-xs font-medium text-mute transition select-none hover:border-white/30 has-checked:border-rose has-checked:bg-rose/15 has-checked:text-rose">
+                <input type="checkbox" name="tag" value={t.key} defaultChecked={tags.includes(t.key)} className="sr-only" />{t.label}
+              </label>
+            ))}
+          </div>
+        </details>
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-7">
-          {!fixedCity && (
+          {!fixed.city && (
             <label><span className="label">Ciudad</span>
               <select name="ciudad" className="input" defaultValue={q.ciudad ?? ''}><option value="">Todas</option>{CITIES.map((c) => <option key={c}>{c}</option>)}</select>
             </label>
           )}
-          <label><span className="label">Categoría</span>
-            <select name="categoria" className="input" defaultValue={q.categoria ?? ''}><option value="">Todas</option>{CATEGORIES.map((c) => <option key={c}>{c}</option>)}</select>
-          </label>
-          <label><span className="label">Servicio</span>
-            <select name="servicio" className="input" defaultValue={q.servicio ?? ''}><option value="">Cualquiera</option>{SERVICES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</select>
-          </label>
+          {!fixed.category && (
+            <label><span className="label">Categoría</span>
+              <select name="categoria" className="input" defaultValue={q.categoria ?? ''}><option value="">Todas</option>{CATEGORIES.map((c) => <option key={c}>{c}</option>)}</select>
+            </label>
+          )}
+          {!fixed.service && (
+            <label><span className="label">Servicio</span>
+              <select name="servicio" className="input" defaultValue={q.servicio ?? ''}><option value="">Cualquiera</option>{SERVICES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</select>
+            </label>
+          )}
           <label><span className="label">Lugar</span>
             <select name="lugar" className="input" defaultValue={q.lugar ?? ''}><option value="">Cualquiera</option><option value="propio">Tiene lugar</option><option value="domicilio">Va a domicilio / hotel</option></select>
           </label>

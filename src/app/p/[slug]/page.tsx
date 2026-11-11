@@ -5,7 +5,10 @@ import { notFound } from 'next/navigation'
 import { cache } from 'react'
 import { submitReport } from '@/app/actions/public'
 import { ActionForm } from '@/components/ActionForm'
+import { confirmByPin } from '@/app/actions/public'
 import { ContactBuilder } from '@/components/ContactBuilder'
+import { FavoriteButton } from '@/components/FavoriteButton'
+import { PinInput } from '@/components/PinInput'
 import { Reveal } from '@/components/motion'
 import { TrustBreakdown, TrustRing } from '@/components/TrustRing'
 import { Availability, Badges, Stars } from '@/components/ui'
@@ -15,6 +18,7 @@ import { copFormat, monthFormat, REPORT_REASONS } from '@/lib/constants'
 import { db } from '@/lib/db'
 import { viewer } from '@/lib/geo'
 import { parseList, serviceLabel, serviceScores } from '@/lib/services'
+import { tagLabel } from '@/lib/tags'
 import { cardInclude, isHiddenFrom, isPublic, releasedReviewWhere, trustOf } from '@/lib/profiles'
 
 type Props = { params: Promise<{ slug: string }> }
@@ -54,6 +58,14 @@ export default async function ProfilePage({ params }: Props) {
   const avg = reviews.length ? reviews.reduce((s, r) => s + r.rating, 0) / reviews.length : null
   const locked = p.discreet && !user
   const schedule = scheduleLabel(p)
+  const isClient = user?.role === 'CLIENT'
+  const [favorite, lastRequest] = isClient
+    ? await Promise.all([
+        db.favorite.findUnique({ where: { userId_profileId: { userId: user.id, profileId: p.id } } }),
+        db.contactRequest.findFirst({ where: { profileId: p.id, clientId: user.id, createdAt: { gt: new Date(Date.now() - 2 * 864e5) } }, orderBy: { createdAt: 'desc' } }),
+      ])
+    : [null, null]
+  const joinHref = `/registro?next=/p/${p.slug}`
   const offered = parseList(p.services)
   const scores = serviceScores(offered, reviews)
   let extras: { label: string; price: number }[] = []
@@ -69,6 +81,8 @@ export default async function ProfilePage({ params }: Props) {
           <h1 className="display text-5xl md:text-6xl">{p.displayName}<span className="text-3xl text-cream/60">, {p.age}</span></h1>
           <p className="text-mute">{p.category} · {p.city}{p.zone && ` · ${p.zone}`}</p>
           <div className="flex flex-wrap gap-2"><Badges p={p} /></div>
+          {parseList(p.tags).length > 0 && <div className="flex flex-wrap gap-1.5">{parseList(p.tags).map((t) => <span key={t} className="chip">{tagLabel(t)}</span>)}</div>}
+          {isPublic(p) && <FavoriteButton profileId={p.id} initial={!!favorite} canUse={!!isClient} loginHref={joinHref} />}
         </header>
 
         {p.photos.length > 0 && (
@@ -170,9 +184,20 @@ export default async function ProfilePage({ params }: Props) {
           {!isPublic(p) ? <p className="text-sm text-mute">Contacto no disponible.</p>
             : locked ? <Link href={`/ingresar?next=/p/${p.slug}`} className="btn btn-primary w-full"><Lock className="size-4" />Ingresa para ver el contacto</Link>
             : <ContactBuilder profileId={p.id} name={p.displayName} priceFrom={p.priceFrom} incall={p.incall} outcall={p.outcall} extras={extras}
-                services={offered.map((k) => ({ key: k, label: serviceLabel(k) }))} />}
-          <p className="flex gap-2 text-xs leading-relaxed text-mute"><QrCode className="size-4 shrink-0" />Al terminar, pídele su código de encuentro para dejar una reseña verificada.</p>
+                services={offered.map((k) => ({ key: k, label: serviceLabel(k) }))} mode={p.contactMode} isClient={!!isClient} loginHref={joinHref}
+                request={(lastRequest?.status as 'PENDING' | 'ACCEPTED' | 'DECLINED' | undefined) ?? 'NONE'} />}
         </div>
+        {isPublic(p) && (
+          <details className="card group" id="pin">
+            <summary className="flex cursor-pointer items-center gap-2 text-sm font-semibold"><QrCode className="size-4 text-rose" />¿Estás con {p.displayName}? Confirma el encuentro</summary>
+            <div className="mt-4 space-y-4">
+              <p className="text-xs leading-relaxed text-mute">Pídele su PIN de 4 dígitos (o escanea su QR). Queda un encuentro verificado y ambos pueden calificarse. Tu identidad no se muestra.</p>
+              {isClient
+                ? <ActionForm action={confirmByPin.bind(null, p.id)} submit="Confirmar encuentro" buttonClass="btn btn-primary w-full"><PinInput /></ActionForm>
+                : <Link href={`/registro?next=/p/${p.slug}`} className="btn btn-sm w-full">Crea una cuenta anónima para confirmar</Link>}
+            </div>
+          </details>
+        )}
         <div className="card space-y-5">
           <div className="flex items-center gap-4">
             <TrustRing trust={trust} />

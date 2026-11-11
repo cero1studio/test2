@@ -11,7 +11,7 @@ export const metadata: Metadata = { title: 'Confirmar encuentro', robots: { inde
 export default async function EncounterPage({ params }: { params: Promise<{ code: string }> }) {
   const { code } = await params
   const user = await getUser()
-  const enc = await db.encounter.findUnique({ where: { code: code.toUpperCase() }, include: { profile: { select: { displayName: true, city: true } } } })
+  const enc = await db.encounter.findUnique({ where: { code: code.toUpperCase().replace(/[^A-Z0-9]/g, '') }, include: { profile: { select: { displayName: true, city: true } } } })
   const valid = enc && !enc.clientId && enc.expiresAt > new Date()
 
   return (
@@ -29,7 +29,7 @@ export default async function EncounterPage({ params }: { params: Promise<{ code
             <div className="space-y-2">
               <p className="eyebrow">Confirmar encuentro</p>
               <h1 className="display text-4xl">{enc.profile.displayName}</h1>
-              <p className="text-sm text-mute">{enc.profile.city} · código <span className="font-mono text-cream">{enc.code}</span></p>
+              <p className="text-sm text-mute">{enc.profile.city}</p>
             </div>
             <p className="text-sm leading-relaxed text-mute">
               Confirma solo si estás con esta persona ahora. Quedará registrado un encuentro verificado y ambos

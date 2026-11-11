@@ -1,13 +1,13 @@
-import { BadgeCheck, CalendarClock, Camera, CircleFadingPlus, EyeOff, Power, QrCode, ShieldCheck, Star, UserRound } from 'lucide-react'
+import { BadgeCheck, BellRing, CalendarClock, Camera, CircleFadingPlus, EyeOff, Inbox, Power, QrCode, ShieldCheck, Star, UserRound } from 'lucide-react'
 import type { Metadata } from 'next'
 import { headers } from 'next/headers'
 import Link from 'next/link'
 import QRCode from 'qrcode'
 import {
-  deletePhoto, openEncounter, rateClient, savePrivacy, saveProfile, saveSchedule, setAvailability, setPublished,
+  decideRequest, deletePhoto, openEncounter, rateClient, savePrivacy, saveProfile, saveSchedule, setAvailability, setPublished,
   submitVerification, uploadPhoto, uploadStory,
 } from '@/app/actions/profile'
-import { goToEncounter, submitReview } from '@/app/actions/public'
+import { submitReview } from '@/app/actions/public'
 import { ActionForm } from '@/components/ActionForm'
 import { Availability, Stars, StarsInput } from '@/components/ui'
 import { requireUser } from '@/lib/auth'
@@ -18,6 +18,7 @@ import { db } from '@/lib/db'
 import { RATE_WINDOW_DAYS } from '@/lib/profiles'
 import { REGIONS } from '@/lib/regions'
 import { parseList, serviceLabel, SERVICES } from '@/lib/services'
+import { TAG_GROUPS } from '@/lib/tags'
 
 export const metadata: Metadata = { title: 'Mi cuenta', robots: { index: false } }
 
@@ -49,6 +50,11 @@ export default async function Panel({ searchParams }: { searchParams: Promise<{ 
 }
 
 async function ClientPanel({ userId, handle, justConfirmed, seal, anonymous, isNew }: { userId: string; handle: string; justConfirmed: boolean; seal?: string; anonymous: boolean; isNew: boolean }) {
+  const [favorites, requests] = await Promise.all([
+    db.favorite.findMany({ where: { userId }, include: { profile: true }, orderBy: { createdAt: 'desc' } }),
+    db.contactRequest.findMany({ where: { clientId: userId, createdAt: { gt: new Date(Date.now() - 7 * 864e5) } }, include: { profile: true }, orderBy: { createdAt: 'desc' }, take: 20 }),
+  ])
+  const favs = favorites.filter((f) => f.profile.status === 'ACTIVE').sort((a, b) => Number(isAvailableNow(b.profile)) - Number(isAvailableNow(a.profile)))
   const [pending, reviews, stats, base] = await Promise.all([
     db.encounter.findMany({ where: { clientId: userId, review: null, confirmedAt: { gt: rateWindow() } }, include: { profile: true }, orderBy: { confirmedAt: 'desc' } }),
     db.review.findMany({ where: { authorId: userId }, include: { profile: true, encounter: true }, orderBy: { createdAt: 'desc' } }),
@@ -69,12 +75,35 @@ async function ClientPanel({ userId, handle, justConfirmed, seal, anonymous, isN
 
         {seal && <p role="status" className="rounded-2xl border border-mint/30 bg-mint/10 px-4 py-3 text-sm text-mint">Reseña guardada con el sello <Link href={`/verificar/${seal}`} className="font-mono underline">{seal}</Link>. Se publica cuando la otra parte también califique, o en 7 días.</p>}
 
+        <Section icon={BellRing} title="Favoritas">
+          {favs.length === 0 ? <p className="text-sm text-mute">Toca «Avísame cuando esté disponible» en un perfil y aparecerá aquí, con las disponibles primero.</p> : (
+            <ul className="divide-y divide-white/8">
+              {favs.map((f) => (
+                <li key={f.id} className="flex items-center justify-between gap-3 py-3 text-sm">
+                  <Link href={`/p/${f.profile.slug}`} className="font-semibold hover:text-rose">{f.profile.displayName} <span className="font-normal text-mute">· {f.profile.city}</span></Link>
+                  <Availability p={f.profile} />
+                </li>
+              ))}
+            </ul>
+          )}
+        </Section>
+
+        {requests.length > 0 && (
+          <Section icon={Inbox} title="Mis solicitudes">
+            <ul className="divide-y divide-white/8">
+              {requests.map((r) => (
+                <li key={r.id} className="flex flex-wrap items-center justify-between gap-3 py-3 text-sm">
+                  <span className="font-semibold">{r.profile.displayName}</span>
+                  {r.status === 'ACCEPTED' ? <Link href={`/p/${r.profile.slug}`} className="btn btn-primary btn-sm">Aceptada · ver su WhatsApp</Link>
+                    : <span className={`chip ${r.status === 'PENDING' ? 'chip-warn' : ''}`}>{r.status === 'PENDING' ? 'Esperando respuesta' : 'No aceptada'}</span>}
+                </li>
+              ))}
+            </ul>
+          </Section>
+        )}
+
         <Section icon={QrCode} title="Confirmar un encuentro">
-          <p className="text-sm text-mute">Escanea el QR que te muestra la anunciante con la cámara del celular, o escribe su código de 6 caracteres.</p>
-          <form action={goToEncounter} className="flex flex-col gap-2 sm:flex-row">
-            <input name="code" className="input font-mono tracking-[0.3em] uppercase" placeholder="ABC234" required maxLength={8} aria-label="Código de encuentro" />
-            <button className="btn btn-primary shrink-0">Continuar</button>
-          </form>
+          <p className="text-sm text-mute">Entra al perfil de la persona y escribe su PIN de 4 dígitos en «Confirma el encuentro», o escanea su QR con la cámara del celular.</p>
         </Section>
 
         {pending.map((e) => (
@@ -155,13 +184,15 @@ async function AdvertiserPanel({ userId, rated }: { userId: string; rated: boole
     await db.profile.update({ where: { id: p.id }, data: { lastSeenAt: now } })
     p = { ...p, lastSeenAt: now }
   }
-  const [active, toRate, base] = p
+  const [active, toRate, base, inbox] = p
     ? await Promise.all([
         db.encounter.findFirst({ where: { profileId: p.id, clientId: null, expiresAt: { gt: now } } }),
         db.encounter.findMany({ where: { profileId: p.id, clientId: { not: null }, clientRating: null, confirmedAt: { gt: rateWindow() } }, include: { client: true }, orderBy: { confirmedAt: 'desc' } }),
         origin(),
+        db.contactRequest.findMany({ where: { profileId: p.id, status: 'PENDING', createdAt: { gt: new Date(now.getTime() - 864e5) } }, include: { client: true }, orderBy: { createdAt: 'asc' } }),
       ])
-    : [null, [], '']
+    : [null, [], '', []]
+  const inboxStats = await Promise.all(inbox.map((r) => clientStats(r.clientId)))
   const approved = p?.photos.filter((ph) => ph.status === 'APPROVED' && ph.kind === 'GALLERY').length ?? 0
   const lastV = p?.verifications[0]
   const canPublish = !!p?.identityVerifiedAt && approved > 0
@@ -172,6 +203,7 @@ async function AdvertiserPanel({ userId, rated }: { userId: string; rated: boole
   const blocked = p?.blockedRegions.split(',').filter(Boolean) ?? []
   const days = p?.scheduleDays.split(',').filter(Boolean) ?? []
   const offered = p ? parseList(p.services) : []
+  const myTags = p ? parseList(p.tags) : []
   let extras: { label: string; price: number }[] = []
   try { extras = JSON.parse(p?.extras ?? '[]') } catch { /* sin adicionales */ }
   const gallery = p?.photos.filter((ph) => ph.kind === 'GALLERY') ?? []
@@ -213,6 +245,31 @@ async function AdvertiserPanel({ userId, rated }: { userId: string; rated: boole
                 ))}
               </div>
             </ActionForm>
+          </Section>
+        )}
+
+        {inbox.length > 0 && (
+          <Section icon={Inbox} title={`Solicitudes (${inbox.length})`} id="solicitudes">
+            <p className="text-xs text-mute">Tu número sigue oculto. Solo quien aceptes podrá verlo durante 48 horas.</p>
+            {inbox.map((r, i) => {
+              const st = inboxStats[i]
+              return (
+                <article key={r.id} className="space-y-3 rounded-2xl border border-white/8 p-4">
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <span className="font-mono font-semibold text-cream">{r.client.handle}</span>
+                    <span className={`chip ${st.encounters ? 'chip-ok' : ''}`}>{st.encounters} encuentros verificados</span>
+                    {st.average !== null && <span className="chip chip-ok">★ {st.average.toFixed(1)} de anunciantes</span>}
+                    {st.paidAsAgreed !== null && <span className="chip">Pagó lo acordado {st.paidAsAgreed} %</span>}
+                    {st.encounters === 0 && <span className="chip chip-warn">Cliente nuevo, sin historial</span>}
+                  </div>
+                  <p className="text-sm whitespace-pre-line text-cream/85">{r.message}</p>
+                  <div className="flex gap-2">
+                    <form action={decideRequest.bind(null, r.id, true)}><button className="btn btn-primary btn-sm">Aceptar y mostrar mi WhatsApp</button></form>
+                    <form action={decideRequest.bind(null, r.id, false)}><button className="btn btn-sm">No aceptar</button></form>
+                  </div>
+                </article>
+              )
+            })}
           </Section>
         )}
 
@@ -259,6 +316,19 @@ async function AdvertiserPanel({ userId, rated }: { userId: string; rated: boole
                 ))}
               </div>
             </fieldset>
+            <fieldset className="space-y-3 sm:col-span-2">
+              <legend className="label">Apariencia y estilo (máximo 8): así te encuentran con los filtros</legend>
+              {TAG_GROUPS.map((g) => (
+                <div key={g.group} className="flex flex-wrap items-center gap-2">
+                  <span className="w-24 text-xs text-mute">{g.group}</span>
+                  {g.tags.map(([key, label]) => (
+                    <label key={key} className="cursor-pointer rounded-full border border-white/10 px-3 py-1.5 text-xs font-medium text-mute transition has-checked:border-rose has-checked:bg-rose/15 has-checked:text-rose">
+                      <input type="checkbox" name="tag" value={key} defaultChecked={myTags.includes(key)} className="sr-only" />{label}
+                    </label>
+                  ))}
+                </div>
+              ))}
+            </fieldset>
             <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm sm:col-span-2">
               <label className="flex cursor-pointer items-center gap-2.5"><input type="checkbox" name="incall" defaultChecked={p?.incall} className="check" />Tengo lugar propio</label>
               <label className="flex cursor-pointer items-center gap-2.5"><input type="checkbox" name="outcall" defaultChecked={p?.outcall} className="check" />Voy a domicilio u hotel</label>
@@ -279,6 +349,15 @@ async function AdvertiserPanel({ userId, rated }: { userId: string; rated: boole
         {p && (
           <Section icon={EyeOff} title="Privacidad" id="privacidad">
             <ActionForm action={savePrivacy} submit="Guardar privacidad">
+              <fieldset className="grid gap-2 text-sm sm:grid-cols-2">
+                <legend className="label">¿Cómo te contactan?</legend>
+                {[['DIRECT', 'Contacto directo', 'Tu WhatsApp se entrega a quien pulse «Escribir».'], ['REQUEST', 'Con solicitud', 'Tu número queda oculto. Recibes la solicitud con la reputación del cliente y decides a quién mostrárselo.']].map(([v, t, d]) => (
+                  <label key={v} className="cursor-pointer rounded-2xl border border-white/10 p-3.5 transition has-checked:border-rose has-checked:bg-rose/10">
+                    <input type="radio" name="contactMode" value={v} defaultChecked={p.contactMode === v} className="sr-only" />
+                    <span className="font-semibold">{t}</span><span className="mt-0.5 block text-xs text-mute">{d}</span>
+                  </label>
+                ))}
+              </fieldset>
               <label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-white/10 p-4 transition has-checked:border-rose has-checked:bg-rose/10">
                 <input type="checkbox" name="discreet" defaultChecked={p.discreet} className="check mt-0.5" />
                 <span><span className="font-semibold">Modo discreto</span><span className="mt-1 block text-sm text-mute">Quien no tenga cuenta verá tus fotos difuminadas y no podrá ver tu contacto. Tu perfil tampoco aparecerá en Google.</span></span>
@@ -385,8 +464,9 @@ async function AdvertiserPanel({ userId, rated }: { userId: string; rated: boole
             {active ? (
               <div className="space-y-3 text-center">
                 <div className="mx-auto w-48 overflow-hidden rounded-2xl" dangerouslySetInnerHTML={{ __html: await qr(`${base}/e/${active.code}`) }} />
-                <p className="font-mono text-3xl font-bold tracking-[0.3em]" data-testid="encounter-code">{active.code}</p>
-                <p className="text-xs text-mute">Muéstraselo a tu cliente. Vence a las {timeFormat.format(active.expiresAt)} y sirve una sola vez.</p>
+                <p className="font-mono text-5xl font-bold tracking-[0.25em]" data-testid="encounter-pin">{active.pin}</p>
+                <a href={`/e/${active.code}`} data-testid="encounter-link" className="sr-only">Enlace del QR</a>
+                <p className="text-xs text-mute">Dile el PIN a tu cliente o muéstrale el QR. Vence a las {timeFormat.format(active.expiresAt)}, sirve una sola vez y se anula tras 5 intentos fallidos.</p>
               </div>
             ) : (
               <>

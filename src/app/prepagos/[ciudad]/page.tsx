@@ -1,7 +1,10 @@
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { Listing, type ListingQuery } from '@/components/Listing'
-import { APP_NAME, cityFromSlug } from '@/lib/constants'
+import Link from 'next/link'
+import { APP_NAME, CATEGORIES, cityFromSlug } from '@/lib/constants'
+import { SERVICES } from '@/lib/services'
+import { TAGS } from '@/lib/tags'
 
 type Props = { params: Promise<{ ciudad: string }>; searchParams: Promise<ListingQuery> }
 
@@ -31,7 +34,12 @@ export default async function CityPage({ params, searchParams }: Props) {
           reseñas provienen de encuentros confirmados en persona y la disponibilidad se actualiza en tiempo real.
         </p>
       </header>
-      <Listing q={await searchParams} fixedCity={city} action={`/prepagos/${ciudad}`} />
+      <nav aria-label={`Búsquedas en ${city}`} className="flex flex-wrap gap-2">
+        {[...CATEGORIES.map((c) => [c.toLowerCase(), c]), ...TAGS.map((t) => [t.key, t.label]), ...SERVICES.map((sv) => [sv.key, sv.label])].map(([slug, label]) => (
+          <Link key={slug} href={`/prepagos/${ciudad}/${slug}`} className="chip transition hover:border-white/30 hover:text-cream">{label}</Link>
+        ))}
+      </nav>
+      <Listing q={await searchParams} fixed={{ city }} action={`/prepagos/${ciudad}`} />
     </div>
   )
 }

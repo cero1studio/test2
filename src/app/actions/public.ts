@@ -21,7 +21,15 @@ export async function revealContact(profileId: string): Promise<{ whatsapp?: str
   if (!rateLimit(`contact:${await clientIp()}`, 15, 60 * 60_000)) return { error: 'Has consultado muchos contactos. Intenta más tarde.' }
   const p = await db.profile.findUnique({ where: { id: profileId } })
   if (!p || !isPublic(p) || isHiddenFrom(p, await viewer())) return { error: 'Perfil no disponible.' }
-  if (p.discreet && !(await getUser())) return { error: 'Este perfil solo comparte su contacto con miembros. Crea una cuenta gratis.' }
+  const user = await getUser()
+  if (p.discreet && !user) return { error: 'Este perfil solo comparte su contacto con miembros. Crea una cuenta gratis.' }
+  if (p.contactMode === 'REQUEST') {
+    // Número oculto: solo se entrega a quien ella aceptó en las últimas 48 h.
+    const accepted = user && (await db.contactRequest.findFirst({
+      where: { profileId, clientId: user.id, status: 'ACCEPTED', decidedAt: { gt: new Date(Date.now() - 2 * 864e5) } },
+    }))
+    if (!accepted) return { error: 'Este perfil recibe solicitudes: su número se muestra cuando acepta la tuya.' }
+  }
   return { whatsapp: p.whatsapp.replace(/^\+/, '') }
 }
 
@@ -64,13 +72,9 @@ export async function goToEncounter(fd: FormData) {
   redirect(`/e/${normalizeCode(fd.get('code')) || '0'}`)
 }
 
-/** El cliente confirma en persona el código que le muestra la anunciante. */
-export async function confirmEncounter(rawCode: string, _: ActionState, __: FormData): Promise<ActionState> {
-  const user = await getUser()
-  if (!user || user.role !== 'CLIENT') return { error: 'Ingresa con una cuenta de cliente para confirmar.' }
-  if (!rateLimit(`enc:${user.id}`, 10, 60 * 60_000)) return { error: 'Demasiados intentos. Prueba más tarde.' }
-  const enc = await db.encounter.findUnique({ where: { code: normalizeCode(rawCode) } })
-  if (!enc || enc.clientId || enc.expiresAt < new Date()) return { error: 'El código no existe, ya se usó o venció. Pide uno nuevo.' }
+type ClaimUser = { id: string; role: string }
+
+async function claimEncounter(enc: { id: string; profileId: string }, user: ClaimUser): Promise<ActionState> {
   const recent = await db.encounter.findFirst({
     where: { profileId: enc.profileId, clientId: user.id, confirmedAt: { gt: new Date(Date.now() - 7 * 864e5) } },
   })
@@ -82,6 +86,70 @@ export async function confirmEncounter(rawCode: string, _: ActionState, __: Form
   if (claimed.count !== 1) return { error: 'El código ya fue usado.' }
   revalidatePath('/panel')
   redirect('/panel?encuentro=ok')
+}
+
+/** Confirmación por QR: el enlace lleva una ficha larga imposible de adivinar. */
+export async function confirmEncounter(rawCode: string, _: ActionState, __: FormData): Promise<ActionState> {
+  const user = await getUser()
+  if (!user || user.role !== 'CLIENT') return { error: 'Ingresa con una cuenta de cliente para confirmar.' }
+  if (!rateLimit(`enc:${user.id}`, 10, 60 * 60_000)) return { error: 'Demasiados intentos. Prueba más tarde.' }
+  const enc = await db.encounter.findUnique({ where: { code: normalizeCode(rawCode) } })
+  if (!enc || enc.clientId || enc.expiresAt < new Date()) return { error: 'El código no existe, ya se usó o venció. Pide uno nuevo.' }
+  return claimEncounter(enc, user)
+}
+
+const MAX_PIN_ATTEMPTS = 5
+
+/**
+ * Confirmación por PIN de 4 dígitos. Es corto, así que solo vale dentro del
+ * perfil que lo generó, dura 15 minutos y se anula al quinto intento fallido:
+ * adivinarlo a ciegas tiene como máximo 5 oportunidades entre 10.000.
+ */
+export async function confirmByPin(profileId: string, _: ActionState, fd: FormData): Promise<ActionState> {
+  const user = await getUser()
+  if (!user || user.role !== 'CLIENT') return { error: 'Ingresa con una cuenta de cliente para confirmar.' }
+  if (!rateLimit(`pin:${user.id}`, 10, 60 * 60_000)) return { error: 'Demasiados intentos. Prueba más tarde.' }
+  const pin = String(fd.get('pin') ?? '').replace(/\D/g, '')
+  if (pin.length !== 4) return { error: 'Escribe los 4 dígitos del PIN.' }
+  const enc = await db.encounter.findFirst({ where: { profileId, clientId: null, expiresAt: { gt: new Date() } }, orderBy: { createdAt: 'desc' } })
+  if (!enc) return { error: 'Este perfil no tiene un PIN activo. Pídele que genere uno.' }
+  if (enc.pin !== pin) {
+    const attempts = enc.attempts + 1
+    const dead = attempts >= MAX_PIN_ATTEMPTS
+    await db.encounter.update({ where: { id: enc.id }, data: { attempts, ...(dead && { expiresAt: new Date() }) } })
+    return { error: dead ? 'Demasiados intentos fallidos: ese PIN quedó anulado. Pídele uno nuevo.' : `PIN incorrecto. ${MAX_PIN_ATTEMPTS - attempts === 1 ? 'Te queda 1 intento' : `Te quedan ${MAX_PIN_ATTEMPTS - attempts} intentos`}.` }
+  }
+  return claimEncounter(enc, user)
+}
+
+export async function toggleFavorite(profileId: string): Promise<{ on?: boolean; error?: string }> {
+  const user = await getUser()
+  if (!user || user.role !== 'CLIENT') return { error: 'Crea una cuenta de cliente para guardar favoritas.' }
+  const where = { userId_profileId: { userId: user.id, profileId } }
+  if (await db.favorite.findUnique({ where })) {
+    await db.favorite.delete({ where })
+    return { on: false }
+  }
+  if ((await db.favorite.count({ where: { userId: user.id } })) >= 100) return { error: 'Máximo 100 favoritas.' }
+  await db.favorite.create({ data: { userId: user.id, profileId } })
+  return { on: true }
+}
+
+/** Solicitud de contacto para perfiles con número oculto. */
+export async function sendRequest(profileId: string, message: string): Promise<{ ok?: true; error?: string }> {
+  const user = await getUser()
+  if (!user || user.role !== 'CLIENT') return { error: 'Crea una cuenta de cliente (puede ser anónima) para enviar la solicitud.' }
+  const p = await db.profile.findUnique({ where: { id: profileId } })
+  if (!p || !isPublic(p) || isHiddenFrom(p, await viewer())) return { error: 'Perfil no disponible.' }
+  const day = new Date(Date.now() - 864e5)
+  const [open, today] = await Promise.all([
+    db.contactRequest.findFirst({ where: { profileId, clientId: user.id, OR: [{ status: 'PENDING' }, { status: 'DECLINED', createdAt: { gt: day } }] } }),
+    db.contactRequest.count({ where: { clientId: user.id, createdAt: { gt: day } } }),
+  ])
+  if (open) return { error: open.status === 'PENDING' ? 'Ya tienes una solicitud pendiente con este perfil.' : 'Este perfil no aceptó tu solicitud. Puedes intentar de nuevo mañana.' }
+  if (today >= 8) return { error: 'Llegaste al máximo de solicitudes por hoy.' }
+  await db.contactRequest.create({ data: { profileId, clientId: user.id, message: message.slice(0, 600) } })
+  return { ok: true }
 }
 
 const reviewSchema = z.object({

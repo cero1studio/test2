@@ -2,7 +2,8 @@
 
 import { MessageCircle, ShieldAlert } from 'lucide-react'
 import { useMemo, useState, useTransition } from 'react'
-import { revealContact } from '@/app/actions/public'
+import Link from 'next/link'
+import { revealContact, sendRequest } from '@/app/actions/public'
 import { APP_NAME, copFormat } from '@/lib/constants'
 
 type Props = {
@@ -10,13 +11,17 @@ type Props = {
   services: { key: string; label: string }[]
   extras: { label: string; price: number }[]
   incall: boolean; outcall: boolean
+  /** REQUEST: el número se entrega solo si ella acepta la solicitud. */
+  mode: string; isClient: boolean; request: 'NONE' | 'PENDING' | 'ACCEPTED' | 'DECLINED'; loginHref: string
 }
 const WHEN = ['Ahora', 'Hoy más tarde', 'Mañana', 'Otro día']
 
 const pill = 'cursor-pointer rounded-full border border-white/10 px-3 py-1.5 text-xs font-medium text-mute transition select-none hover:border-white/30 has-checked:border-rose has-checked:bg-rose/15 has-checked:text-rose'
 
 /** El cliente arma su solicitud y el mensaje de WhatsApp sale ya escrito: menos ida y vuelta. */
-export function ContactBuilder({ profileId, name, priceFrom, services, extras, incall, outcall }: Props) {
+export function ContactBuilder({ profileId, name, priceFrom, services, extras, incall, outcall, mode, isClient, request, loginHref }: Props) {
+  const [status, setStatus] = useState(request)
+  const gated = mode === 'REQUEST' && status !== 'ACCEPTED'
   const [svc, setSvc] = useState<string[]>([])
   const [ext, setExt] = useState<number[]>([])
   const [place, setPlace] = useState(incall && !outcall ? 'En su lugar' : outcall && !incall ? 'A domicilio / hotel' : '')
@@ -49,8 +54,20 @@ export function ContactBuilder({ profileId, name, priceFrom, services, extras, i
     window.open(`https://wa.me/${number}?text=${encodeURIComponent(message)}`, '_blank', 'noopener,noreferrer')
   })
 
+  const ask = () => start(async () => {
+    setError('')
+    const res = await sendRequest(profileId, message)
+    if (res.ok) setStatus('PENDING')
+    else setError(res.error ?? 'No se pudo enviar la solicitud.')
+  })
+
   return (
     <div className="space-y-4">
+      {mode === 'REQUEST' && (
+        <p className="rounded-2xl border border-white/10 bg-white/[0.03] p-3 text-xs leading-relaxed text-mute">
+          <strong className="text-cream">{name} recibe solicitudes.</strong> Arma la tuya: ella la revisa junto con tu reputación y, si acepta, verás su WhatsApp aquí y en tu cuenta.
+        </p>
+      )}
       {services.length > 0 && (
         <fieldset className="space-y-2"><legend className="label">¿Qué te interesa?</legend>
           <div className="flex flex-wrap gap-1.5">
@@ -92,9 +109,17 @@ export function ContactBuilder({ profileId, name, priceFrom, services, extras, i
           <strong className="tabular-nums" data-testid="estimate">{copFormat.format(priceFrom + extrasTotal)}</strong>
         </p>
       )}
-      <button className="btn btn-primary w-full" disabled={pending} onClick={open}>
-        <MessageCircle className="size-4" />{pending ? 'Abriendo…' : phone ? `WhatsApp · +${phone}` : 'Escribir por WhatsApp'}
-      </button>
+      {!gated ? (
+        <button className="btn btn-primary w-full" disabled={pending} onClick={open}>
+          <MessageCircle className="size-4" />{pending ? 'Abriendo…' : phone ? `WhatsApp · +${phone}` : status === 'ACCEPTED' ? 'Solicitud aceptada · Escribir por WhatsApp' : 'Escribir por WhatsApp'}
+        </button>
+      ) : !isClient ? (
+        <Link href={loginHref} className="btn btn-primary w-full">Crear cuenta anónima para enviar solicitud</Link>
+      ) : status === 'PENDING' ? (
+        <p role="status" className="rounded-2xl border border-mint/30 bg-mint/10 px-4 py-3 text-center text-sm text-mint">Solicitud enviada. Verás la respuesta en tu cuenta.</p>
+      ) : (
+        <button className="btn btn-primary w-full" disabled={pending} onClick={ask}>{pending ? 'Enviando…' : 'Enviar solicitud'}</button>
+      )}
       {error && <p role="alert" className="text-sm text-rose">{error}</p>}
       <details className="text-xs text-mute">
         <summary className="cursor-pointer hover:text-cream">Ver el mensaje que se enviará</summary>

@@ -10,6 +10,7 @@ import { MobileNav } from '@/components/MobileNav'
 import { MotionProvider } from '@/components/motion'
 import { Logo } from '@/components/ui'
 import { getUser } from '@/lib/auth'
+import { db } from '@/lib/db'
 import { APP_NAME, SITE_URL, TAGLINE } from '@/lib/constants'
 import './globals.css'
 
@@ -24,6 +25,15 @@ export const viewport: Viewport = { themeColor: '#0b0a0e' }
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const adult = (await cookies()).get('adulto')?.value === '1'
   const user = await getUser()
+  // Avisos en la cuenta: favoritas disponibles y solicitudes aceptadas (cliente); solicitudes por responder (anunciante).
+  const now = new Date()
+  const alerts = !user ? 0
+    : user.role === 'CLIENT'
+      ? (await db.favorite.count({ where: { userId: user.id, profile: { status: 'ACTIVE', availableUntil: { gt: now } } } }))
+        + (await db.contactRequest.count({ where: { clientId: user.id, status: 'ACCEPTED', decidedAt: { gt: new Date(now.getTime() - 864e5) } } }))
+      : user.role === 'ADVERTISER'
+        ? await db.contactRequest.count({ where: { profile: { userId: user.id }, status: 'PENDING', createdAt: { gt: new Date(now.getTime() - 864e5) } } })
+        : 0
   return (
     <html lang="es" className={GeistSans.variable}>
       <body>
@@ -43,7 +53,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                   {user ? (
                     <>
                       {user.role === 'ADMIN' && <Link href="/admin" className="text-mute transition hover:text-cream">Moderación</Link>}
-                      <Link href="/panel" className="btn btn-sm">Mi cuenta</Link>
+                      <Link href="/panel" className="btn btn-sm">Mi cuenta{alerts > 0 && <span className="grid size-5 place-items-center rounded-full bg-rose text-[0.65rem] font-bold text-bg" aria-label={`${alerts} avisos`}>{alerts}</span>}</Link>
                       <form action={logout}><button className="cursor-pointer text-mute transition hover:text-cream">Salir</button></form>
                     </>
                   ) : (
