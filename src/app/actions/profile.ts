@@ -49,7 +49,10 @@ export async function saveProfile(_: ActionState, fd: FormData): Promise<ActionS
 export async function savePrivacy(_: ActionState, fd: FormData): Promise<ActionState> {
   const { profile } = await ownProfile()
   if (!profile) return { error: 'Primero guarda tu perfil.' }
-  const blocked = fd.getAll('blocked').filter((c) => REGIONS.some((r) => r.code === c))
+  // «Solo fuera de Colombia» equivale a bloquear todos los departamentos.
+  const blocked = fd.get('onlyAbroad') === 'on'
+    ? REGIONS.map((r) => r.code).filter((c) => c !== 'EXT')
+    : fd.getAll('blocked').filter((c) => REGIONS.some((r) => r.code === c))
   await db.profile.update({
     where: { id: profile.id },
     data: { discreet: fd.get('discreet') === 'on', blockedRegions: blocked.length ? `,${blocked.join(',')},` : '' },

@@ -225,6 +225,10 @@ async function AdvertiserPanel({ userId, rated }: { userId: string; rated: boole
                 <input type="checkbox" name="discreet" defaultChecked={p.discreet} className="check mt-0.5" />
                 <span><span className="font-semibold">Modo discreto</span><span className="mt-1 block text-sm text-mute">Quien no tenga cuenta verá tus fotos difuminadas y no podrá ver tu contacto. Tu perfil tampoco aparecerá en Google.</span></span>
               </label>
+              <label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-white/10 p-4 transition has-checked:border-rose has-checked:bg-rose/10">
+                <input type="checkbox" name="onlyAbroad" defaultChecked={blocked.length === REGIONS.length - 1 && !blocked.includes('EXT')} className="check mt-0.5" />
+                <span><span className="font-semibold">Solo visible fuera de Colombia</span><span className="mt-1 block text-sm text-mute">Tu perfil solo aparecerá a quien navegue desde otro país. Ojo: un extranjero que ya está en Colombia navega con conexión colombiana y no te verá.</span></span>
+              </label>
               <fieldset className="space-y-3">
                 <legend className="label">Dónde NO quieres aparecer</legend>
                 <p className="text-xs leading-relaxed text-mute">Quien navegue desde los lugares marcados no verá tu perfil, tus fotos ni tu contacto, ni siquiera con el enlace directo. Se basa en la ubicación de la conexión: protege frente a la mayoría, pero alguien con VPN podría saltárselo.</p>
