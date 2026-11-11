@@ -13,7 +13,7 @@ export default async function Register({ searchParams }: { searchParams: Promise
       <div className="card space-y-6 p-8">
         <div className="space-y-2">
           <h1 className="display text-4xl">Crea tu <em className="grad-text">cuenta</em></h1>
-          <p className="text-sm text-mute">Solo pedimos un correo. Tu perfil usa un alias anónimo: nunca mostramos tu correo ni tu nombre real.</p>
+          <p className="text-sm text-mute">Para buscar no necesitas ni correo: solo una contraseña. Te damos un alias anónimo y nunca pedimos tu nombre ni tu teléfono.</p>
         </div>
         <ActionForm action={register} submit="Crear cuenta" buttonClass="btn btn-primary w-full">
           {next && <input type="hidden" name="next" value={next} />}
@@ -25,7 +25,7 @@ export default async function Register({ searchParams }: { searchParams: Promise
               </label>
             ))}
           </fieldset>
-          <label className="block"><span className="label">Correo</span><input name="email" type="email" className="input" required autoComplete="email" /></label>
+          <label className="block"><span className="label">Correo <span className="normal-case">(opcional si solo buscas)</span></span><input name="email" type="email" className="input" autoComplete="email" placeholder="Déjalo vacío para una cuenta anónima" /></label>
           <label className="block"><span className="label">Contraseña (mínimo 10 caracteres)</span><input name="password" type="password" className="input" required minLength={10} autoComplete="new-password" /></label>
           <label className="flex items-start gap-2.5 text-sm text-mute">
             <input type="checkbox" name="adult" required className="check mt-0.5" />

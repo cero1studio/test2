@@ -9,7 +9,7 @@ generator client {
 
 model User {
   id           String         @id @default(cuid())
-  email        String         @unique
+  email        String?        @unique // opcional: las cuentas de cliente pueden ser anónimas
   passwordHash String
   role         String         @default("CLIENT") // CLIENT | ADVERTISER | ADMIN
   handle       String         @unique // alias anónimo; nunca se muestra el correo
@@ -44,7 +44,13 @@ model Profile {
   whatsapp           String
   status             String         @default("DRAFT") // DRAFT | ACTIVE | PAUSED | REVIEW | SUSPENDED
   verifyCode         String
+  kind               String         @default("INDEPENDENT") // INDEPENDENT | AGENCY
+  services           String         @default("") // ",masaje,cena,"
+  extras             String         @default("[]") // JSON: [{ label, price }] adicionales configurables
+  incall             Boolean        @default(false) // atiende en lugar propio
+  outcall            Boolean        @default(false) // atiende a domicilio u hotel
   // Privacidad
+  foreignersOnly     Boolean        @default(false) // solo visible para visitantes extranjeros
   discreet           Boolean        @default(false) // fotos difuminadas y contacto oculto para quien no tiene cuenta
   blockedRegions     String         @default("") // ",ANT,EXT," regiones donde NO se muestra
   // Disponibilidad: "ahora" siempre vence sola; el horario es informativo
@@ -73,6 +79,9 @@ model Photo {
   profile   Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
   file      String // nítida, con marca de agua
   blurFile  String // versión difuminada en el servidor (modo discreto)
+  kind      String    @default("GALLERY") // GALLERY | STORY
+  expiresAt DateTime? // historias: 24 h desde su aprobación
+  hash      String    @default("") // huella perceptual para detectar fotos repetidas
   status    String   @default("PENDING") // PENDING | APPROVED
   createdAt DateTime @default(now())
 }
@@ -121,6 +130,7 @@ model Review {
   photosMatch  Boolean
   askedDeposit Boolean
   body         String
+  serviceRatings String  @default("{}") // JSON: { masaje: 5, cena: 4 }
   visibility   String    @default("MEMBERS") // MEMBERS (solo con cuenta) | PUBLIC
   status       String    @default("VISIBLE") // VISIBLE | HIDDEN
   createdAt    DateTime  @default(now())

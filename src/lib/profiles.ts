@@ -4,16 +4,19 @@ import { computeTrust } from './trust'
 /** Un perfil solo es público si está activo Y su identidad (18+) fue verificada. */
 export const publicWhere = { status: 'ACTIVE', identityVerifiedAt: { not: null } } satisfies Prisma.ProfileWhereInput
 
-/** Filtro de listados: perfiles públicos que no bloquearon la región del visitante. */
-export const visibleWhere = (region: string | null) =>
+type ViewerLike = { region: string | null; foreign: boolean }
+
+/** Filtro de listados: perfiles públicos que este visitante puede ver. */
+export const visibleWhere = (v: ViewerLike) =>
   ({
     ...publicWhere,
     // Sin ubicación conocida solo se muestran perfiles sin bloqueos (privacidad primero).
-    ...(region ? { NOT: { blockedRegions: { contains: `,${region},` } } } : { blockedRegions: '' }),
+    ...(v.region ? { NOT: { blockedRegions: { contains: `,${v.region},` } } } : { blockedRegions: '' }),
+    ...(!v.foreign && { foreignersOnly: false }),
   }) satisfies Prisma.ProfileWhereInput
 
-export const isBlockedIn = (p: { blockedRegions: string }, region: string | null) =>
-  p.blockedRegions !== '' && (!region || p.blockedRegions.includes(`,${region},`))
+export const isHiddenFrom = (p: { blockedRegions: string; foreignersOnly: boolean }, v: ViewerLike) =>
+  (p.blockedRegions !== '' && (!v.region || p.blockedRegions.includes(`,${v.region},`))) || (p.foreignersOnly && !v.foreign)
 
 export const isPublic = (p: { status: string; identityVerifiedAt: Date | null }) =>
   p.status === 'ACTIVE' && p.identityVerifiedAt !== null
@@ -39,8 +42,8 @@ export const releasedRatingWhere = () =>
 
 export const cardInclude = () =>
   ({
-    photos: { where: { status: 'APPROVED' }, orderBy: { createdAt: 'asc' } },
-    reviews: { where: releasedReviewWhere(), select: { rating: true, photosMatch: true, askedDeposit: true } },
+    photos: { where: { status: 'APPROVED', kind: 'GALLERY' }, orderBy: { createdAt: 'asc' } },
+    reviews: { where: releasedReviewWhere(), select: { rating: true, photosMatch: true, askedDeposit: true, serviceRatings: true } },
     _count: { select: { reports: { where: { status: 'OPEN' } }, encounters: { where: { confirmedAt: { not: null } } } } },
   }) satisfies Prisma.ProfileInclude
 

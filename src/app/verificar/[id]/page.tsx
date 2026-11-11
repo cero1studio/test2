@@ -3,8 +3,8 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { monthFormat } from '@/lib/constants'
 import { db } from '@/lib/db'
-import { viewerRegion } from '@/lib/geo'
-import { isBlockedIn, isPublic } from '@/lib/profiles'
+import { viewer } from '@/lib/geo'
+import { isHiddenFrom, isPublic } from '@/lib/profiles'
 
 export const metadata: Metadata = { title: 'Sello de encuentro', robots: { index: false } }
 
@@ -15,7 +15,7 @@ export default async function Seal({ params }: { params: Promise<{ id: string }>
     include: { profile: true, review: { select: { id: true } }, clientRating: { select: { id: true } } },
   })
   // El sello no debe delatar perfiles que el visitante no puede ver.
-  const visible = enc && isPublic(enc.profile) && !isBlockedIn(enc.profile, await viewerRegion())
+  const visible = enc && isPublic(enc.profile) && !isHiddenFrom(enc.profile, await viewer())
 
   return (
     <div className="container-page max-w-xl py-16">

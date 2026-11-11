@@ -1,8 +1,8 @@
-import { BadgeCheck, Camera, EyeOff } from 'lucide-react'
+import { BadgeCheck, Building2, Camera, EyeOff, UserRound } from 'lucide-react'
 import { useId } from 'react'
 import { availabilityLabel } from '@/lib/availability'
 
-type Verified = { identityVerifiedAt: Date | null; photosVerifiedAt: Date | null; discreet?: boolean }
+type Verified = { identityVerifiedAt: Date | null; photosVerifiedAt: Date | null; discreet?: boolean; kind?: string }
 
 export function Badges({ p }: { p: Verified }) {
   return (
@@ -11,6 +11,8 @@ export function Badges({ p }: { p: Verified }) {
       {p.photosVerifiedAt
         ? <span className="chip chip-ok"><Camera className="size-3.5" />Fotos reales</span>
         : <span className="chip chip-warn"><Camera className="size-3.5" />Fotos sin verificar</span>}
+      {p.kind === 'AGENCY' && <span className="chip chip-warn"><Building2 className="size-3.5" />Agencia</span>}
+      {p.kind === 'INDEPENDENT' && <span className="chip"><UserRound className="size-3.5" />Independiente</span>}
       {p.discreet && <span className="chip"><EyeOff className="size-3.5" />Perfil discreto</span>}
     </>
   )
@@ -49,8 +51,13 @@ export function StarsInput({ name = 'rating' }: { name?: string }) {
 
 export function Logo({ className = '' }: { className?: string }) {
   return (
-    <span className={`display text-2xl ${className}`}>
-      sigila<span className="grad-text">.</span>
+    <span className={`display inline-flex items-center gap-2 text-2xl ${className}`}>
+      <svg viewBox="8 8 52 48" className="h-[0.95em] w-auto" aria-hidden>
+        <defs><linearGradient id="logo-g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#ff6b97" /><stop offset="1" stopColor="#ffb07a" /></linearGradient></defs>
+        <path d="M46.6 20.4A19 19 0 1 0 51 32" fill="none" stroke="url(#logo-g)" strokeWidth="7" strokeLinecap="round" />
+        <circle cx="49" cy="16" r="5" fill="url(#logo-g)" />
+      </svg>
+      sigila
     </span>
   )
 }

@@ -8,6 +8,8 @@ import { CATEGORIES, CITIES, type ActionState } from '@/lib/constants'
 import { db } from '@/lib/db'
 import { RATE_WINDOW_DAYS, randomCode, slugify } from '@/lib/profiles'
 import { REGIONS } from '@/lib/regions'
+import { depositLanguage } from '@/lib/scam'
+import { SERVICES, toList } from '@/lib/services'
 import { deleteImage, saveImage, savePhoto } from '@/lib/storage'
 
 const profileSchema = z.object({
@@ -30,12 +32,32 @@ export async function saveProfile(_: ActionState, fd: FormData): Promise<ActionS
   const { user, profile } = await ownProfile()
   const parsed = profileSchema.safeParse(Object.fromEntries(fd))
   if (!parsed.success) return { error: parsed.error.issues[0].message }
+
+  // Adicionales configurables: hasta 8 filas de nombre + precio.
+  const labels = fd.getAll('extraLabel').map((v) => String(v).trim().slice(0, 40))
+  const prices = fd.getAll('extraPrice').map((v) => Math.max(0, Math.trunc(Number(v)) || 0))
+  const extras = labels.map((label, i) => ({ label, price: prices[i] ?? 0 })).filter((e) => e.label).slice(0, 8)
+
+  // Señales de estafa que se frenan antes de publicar.
+  const flagged = depositLanguage([parsed.data.description, ...extras.map((e) => e.label)].join(' '))
+  if (flagged) return { error: `Tu anuncio menciona «${flagged}». Aquí está prohibido pedir dinero antes del encuentro: quítalo para guardar.` }
+  const sameNumber = await db.profile.findFirst({ where: { whatsapp: parsed.data.whatsapp, userId: { not: user.id } } })
+  if (sameNumber) return { error: 'Ese número de WhatsApp ya está en otro perfil. Cada número solo puede anunciar un perfil.' }
+
+  const data = {
+    ...parsed.data,
+    kind: fd.get('kind') === 'AGENCY' ? 'AGENCY' : 'INDEPENDENT',
+    services: toList(fd.getAll('service').map(String).filter((k) => SERVICES.some((x) => x.key === k))),
+    extras: JSON.stringify(extras),
+    incall: fd.get('incall') === 'on',
+    outcall: fd.get('outcall') === 'on',
+  }
   if (profile) {
-    await db.profile.update({ where: { id: profile.id }, data: parsed.data })
+    await db.profile.update({ where: { id: profile.id }, data })
   } else {
     await db.profile.create({
       data: {
-        ...parsed.data,
+        ...data,
         userId: user.id,
         slug: `${slugify(parsed.data.displayName) || 'perfil'}-${randomCode(5).toLowerCase()}`,
         verifyCode: `SGL-${randomCode(5)}`,
@@ -49,13 +71,10 @@ export async function saveProfile(_: ActionState, fd: FormData): Promise<ActionS
 export async function savePrivacy(_: ActionState, fd: FormData): Promise<ActionState> {
   const { profile } = await ownProfile()
   if (!profile) return { error: 'Primero guarda tu perfil.' }
-  // «Solo fuera de Colombia» equivale a bloquear todos los departamentos.
-  const blocked = fd.get('onlyAbroad') === 'on'
-    ? REGIONS.map((r) => r.code).filter((c) => c !== 'EXT')
-    : fd.getAll('blocked').filter((c) => REGIONS.some((r) => r.code === c))
+  const blocked = fd.getAll('blocked').filter((c) => REGIONS.some((r) => r.code === c))
   await db.profile.update({
     where: { id: profile.id },
-    data: { discreet: fd.get('discreet') === 'on', blockedRegions: blocked.length ? `,${blocked.join(',')},` : '' },
+    data: { discreet: fd.get('discreet') === 'on', foreignersOnly: fd.get('foreignersOnly') === 'on', blockedRegions: blocked.length ? `,${blocked.join(',')},` : '' },
   })
   revalidatePath('/panel')
   return { ok: 'Privacidad actualizada. Aplica de inmediato.' }
@@ -89,7 +108,7 @@ export async function setAvailability(hours: number) {
 export async function uploadPhoto(_: ActionState, fd: FormData): Promise<ActionState> {
   const { profile } = await ownProfile()
   if (!profile) return { error: 'Primero guarda tu perfil.' }
-  if ((await db.photo.count({ where: { profileId: profile.id } })) >= 12) return { error: 'Máximo 12 fotos.' }
+  if ((await db.photo.count({ where: { profileId: profile.id, kind: 'GALLERY' } })) >= 12) return { error: 'Máximo 12 fotos.' }
   try {
     await db.photo.create({ data: { profileId: profile.id, ...(await savePhoto(fd.get('photo'))) } })
   } catch (e) {
@@ -97,6 +116,23 @@ export async function uploadPhoto(_: ActionState, fd: FormData): Promise<ActionS
   }
   revalidatePath('/panel')
   return { ok: 'Foto subida. Será visible cuando moderación la apruebe.' }
+}
+
+/** Historia: una foto que dura 24 h desde que moderación la aprueba. */
+export async function uploadStory(_: ActionState, fd: FormData): Promise<ActionState> {
+  const { profile } = await ownProfile()
+  if (!profile?.identityVerifiedAt) return { error: 'Verifica tu identidad para publicar historias.' }
+  const live = await db.photo.count({
+    where: { profileId: profile.id, kind: 'STORY', OR: [{ status: 'PENDING' }, { expiresAt: { gt: new Date() } }] },
+  })
+  if (live >= 5) return { error: 'Máximo 5 historias activas a la vez.' }
+  try {
+    await db.photo.create({ data: { profileId: profile.id, kind: 'STORY', ...(await savePhoto(fd.get('photo'))) } })
+  } catch (e) {
+    return { error: (e as Error).message }
+  }
+  revalidatePath('/panel')
+  return { ok: 'Historia enviada. Dura 24 horas desde que moderación la apruebe.' }
 }
 
 export async function deletePhoto(photoId: string) {

@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto'
 import path from 'node:path'
 import sharp from 'sharp'
 import { APP_NAME } from './constants'
+import { photoHash } from './scam'
 
 // Los archivos viven fuera de /public: solo se sirven a través de rutas que
 // comprueban permisos (ver app/media y app/admin/archivo).
@@ -49,7 +50,7 @@ export async function saveImage(file: unknown): Promise<string> {
 }
 
 /** Foto de perfil: versión nítida con marca de agua + versión difuminada en servidor. */
-export async function savePhoto(input: unknown | Buffer): Promise<{ file: string; blurFile: string }> {
+export async function savePhoto(input: unknown | Buffer): Promise<{ file: string; blurFile: string; hash: string }> {
   const buf = Buffer.isBuffer(input) ? input : await toBuffer(input)
   return run(async () => {
     const file = newName()
@@ -57,7 +58,7 @@ export async function savePhoto(input: unknown | Buffer): Promise<{ file: string
     const clean = await normalize(buf).toBuffer()
     await sharp(clean).composite([{ input: watermark, tile: true }]).webp({ quality: 82 }).toFile(target(file))
     await sharp(clean).resize({ width: 480, withoutEnlargement: true }).blur(26).webp({ quality: 60 }).toFile(target(blurFile))
-    return { file, blurFile }
+    return { file, blurFile, hash: await photoHash(clean) }
   })
 }
 

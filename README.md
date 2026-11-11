@@ -17,9 +17,21 @@ trans) para adultos, construida alrededor de dos necesidades: **privacidad** par
 El cliente elige si el texto de su reseña es público o **privado** (solo miembros con cuenta). La
 calificación y el sello siempre son visibles.
 
+### Pensada para quien busca
+- **Sin registro** para navegar y contactar; si quiere reseñar, **cuenta anónima** (solo contraseña y un alias, sin correo).
+- Buscador y filtros que se aplican solos: ciudad, categoría, servicio, lugar, edad, tarifa, disponibles ahora, fotos verificadas, solo independientes.
+- **Mensaje de WhatsApp ya armado**: el cliente elige servicio, adicionales (configurados por la anunciante, con precio), lugar y horario.
+- **Calificación por servicio**: cada reseña verificada califica solo los servicios tomados.
+- **Historias** de 24 horas, como en una red social, para ver quién está activa hoy.
+
+### Independientes, agencias y estafas
+- Cada perfil declara si es **independiente** o **agencia/establecimiento**; se muestra en el perfil y hay filtro «solo independientes».
+- Detección automática: bloquea anuncios que piden dinero por adelantado, impide repetir un número de WhatsApp en dos perfiles y avisa a moderación cuando una foto coincide con la de otro perfil (huella perceptual).
+
 ### Privacidad para quien anuncia
 - **Modo discreto**: sin cuenta, las fotos se sirven difuminadas desde el servidor y el contacto queda oculto. El perfil no se envía a buscadores.
 - **Bloqueo por ubicación**: por departamento o «fuera de Colombia»; aplica a listados, perfil, fotos, contacto y sellos.
+- **Solo visitantes extranjeros**: visible si la conexión es de otro país o el navegador no está en español (indicios, no garantía).
 - Documento de identidad **eliminado** al resolver la verificación; metadatos y GPS borrados de las fotos; marca de agua.
 - **Pase de cliente**: reputación agregada del cliente (respeto, pago, puntualidad) que él comparte antes del encuentro.
 
@@ -45,8 +57,20 @@ pnpm dev          # http://localhost:3000
 | Cliente | `cliente1@sigila.test` | `demo-cliente-123` |
 | Anunciante | `anunciante1@sigila.test` | `demo-anunciante-123` |
 
+El logo está en `public/logo.svg` (con texto) y `public/logo-mark.svg` (solo el símbolo).
+
 Los retratos de demostración son ilustraciones generadas; no hay fotos de personas reales.
 Otros comandos: `pnpm test`, `pnpm typecheck`, `pnpm build`.
+
+## Desplegar en Railway
+
+1. En Railway: **New Project → Deploy from GitHub repo** y elige este repositorio y rama. `railway.json` ya define build y arranque.
+2. Añade un **Volume** montado en `/data`.
+3. Variables: `DATABASE_URL=file:/data/app.db`, `STORAGE_DIR=/data/storage`, `SITE_URL=https://tu-dominio`, `SEED_ADMIN_PASSWORD=<una clave tuya>`.
+4. El primer arranque crea las tablas y carga la demo una sola vez (`--if-empty`).
+
+El comando de arranque se probó localmente; el despliegue en Railway en sí no se ha probado. Detrás de Railway no hay
+cabeceras de geolocalización: pon Cloudflare delante para que funcione el bloqueo por región.
 
 ## Estructura
 

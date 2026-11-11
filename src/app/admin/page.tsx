@@ -4,6 +4,7 @@ import { resolveReport, reviewPhoto, reviewVerification } from '@/app/actions/ad
 import { requireUser } from '@/lib/auth'
 import { dateFormat, REPORT_REASONS } from '@/lib/constants'
 import { db } from '@/lib/db'
+import { hashDistance, SAME_PHOTO_MAX_DISTANCE } from '@/lib/scam'
 
 export const metadata: Metadata = { title: 'Moderación', robots: { index: false } }
 
@@ -19,6 +20,10 @@ export default async function Admin() {
     }),
     db.report.findMany({ where: { status: 'OPEN' }, include: { profile: true }, orderBy: { createdAt: 'asc' } }),
   ])
+  // Señal de estafa: la misma foto ya publicada en el perfil de otra persona.
+  const known = photos.length ? await db.photo.findMany({ where: { status: 'APPROVED', hash: { not: '' } }, select: { hash: true, profileId: true, profile: { select: { displayName: true, slug: true } } }, take: 5000 }) : []
+  const duplicateOf = (ph: { hash: string; profileId: string }) =>
+    ph.hash ? known.find((k) => k.profileId !== ph.profileId && hashDistance(k.hash, ph.hash) <= SAME_PHOTO_MAX_DISTANCE)?.profile : undefined
   reports.sort((a, b) => Number(!!reason(b.reason)?.severe) - Number(!!reason(a.reason)?.severe))
 
   return (
@@ -87,11 +92,13 @@ export default async function Admin() {
         <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
           {photos.map((ph) => {
             const ref = ph.profile.verifications[0]
+            const dup = duplicateOf(ph)
             return (
               <div key={ph.id} className="card space-y-2.5 p-3 text-sm">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={`/media/${ph.id}`} alt="" className="aspect-[4/5] w-full rounded-2xl object-cover" />
-                <p className="truncate font-semibold">{ph.profile.displayName}</p>
+                <p className="truncate font-semibold">{ph.profile.displayName} {ph.kind === 'STORY' && <span className="chip ml-1">Historia</span>}</p>
+                {dup && <p className="rounded-xl border border-rose/40 bg-rose/10 p-2 text-xs text-rose">Posible foto robada: coincide con una de <Link href={`/p/${dup.slug}`} className="underline">{dup.displayName}</Link>.</p>}
                 {ref?.selfieFile
                   ? <a href={`/admin/archivo/${ref.id}?t=selfie`} target="_blank" className="text-xs text-rose hover:underline">Comparar con selfie verificada</a>
                   : <p className="text-xs text-amber">Sin selfie de referencia</p>}

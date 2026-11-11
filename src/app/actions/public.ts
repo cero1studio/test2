@@ -7,9 +7,10 @@ import { z } from 'zod'
 import { getUser } from '@/lib/auth'
 import { REPORT_REASONS, type ActionState } from '@/lib/constants'
 import { db } from '@/lib/db'
-import { viewerRegion } from '@/lib/geo'
-import { isBlockedIn, isPublic, RATE_WINDOW_DAYS } from '@/lib/profiles'
+import { viewer } from '@/lib/geo'
+import { isHiddenFrom, isPublic, RATE_WINDOW_DAYS } from '@/lib/profiles'
 import { clientIp, rateLimit } from '@/lib/rate-limit'
+import { parseList } from '@/lib/services'
 
 export async function confirmAge() {
   ;(await cookies()).set('adulto', '1', { path: '/', maxAge: 60 * 60 * 24 * 30, sameSite: 'lax' })
@@ -19,7 +20,7 @@ export async function confirmAge() {
 export async function revealContact(profileId: string): Promise<{ whatsapp?: string; error?: string }> {
   if (!rateLimit(`contact:${await clientIp()}`, 15, 60 * 60_000)) return { error: 'Has consultado muchos contactos. Intenta más tarde.' }
   const p = await db.profile.findUnique({ where: { id: profileId } })
-  if (!p || !isPublic(p) || isBlockedIn(p, await viewerRegion())) return { error: 'Perfil no disponible.' }
+  if (!p || !isPublic(p) || isHiddenFrom(p, await viewer())) return { error: 'Perfil no disponible.' }
   if (p.discreet && !(await getUser())) return { error: 'Este perfil solo comparte su contacto con miembros. Crea una cuenta gratis.' }
   return { whatsapp: p.whatsapp.replace(/^\+/, '') }
 }
@@ -101,9 +102,16 @@ export async function submitReview(encounterId: string, _: ActionState, fd: Form
     include: { profile: true },
   })
   if (!enc) return { error: 'Este encuentro ya no se puede reseñar.' }
+  // Calificación por servicio: solo los que el perfil ofrece y el cliente marcó.
+  const serviceRatings: Record<string, number> = {}
+  for (const key of parseList(enc.profile.services)) {
+    const v = Math.trunc(Number(fd.get(`svc_${key}`)))
+    if (v >= 1 && v <= 5) serviceRatings[key] = v
+  }
   await db.review.create({
     data: {
       encounterId: enc.id, profileId: enc.profileId, authorId: user.id, ...parsed.data,
+      serviceRatings: JSON.stringify(serviceRatings),
       photosMatch: fd.get('photosMatch') === 'on',
       askedDeposit: fd.get('askedDeposit') === 'on',
       visibility: fd.get('visibility') === 'PUBLIC' ? 'PUBLIC' : 'MEMBERS',

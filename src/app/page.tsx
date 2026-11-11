@@ -1,12 +1,13 @@
-import { BadgeCheck, Clock, EyeOff, Fingerprint, MapPinOff, QrCode, ScanFace, ShieldCheck, Star, UserCheck } from 'lucide-react'
+import { BadgeCheck, Clock, EyeOff, Fingerprint, MapPinOff, MessageCircle, QrCode, ScanFace, Search, ShieldCheck, Star, UserCheck } from 'lucide-react'
 import Link from 'next/link'
 import { ProfileCard } from '@/components/ProfileCard'
+import { StoriesBar } from '@/components/StoriesBar'
 import { Reveal, Stagger, StaggerItem } from '@/components/motion'
 import { getUser } from '@/lib/auth'
 import { isAvailableNow } from '@/lib/availability'
 import { APP_NAME, CITIES, citySlug } from '@/lib/constants'
 import { db } from '@/lib/db'
-import { viewerRegion } from '@/lib/geo'
+import { viewer } from '@/lib/geo'
 import { cardInclude, trustOf, visibleWhere } from '@/lib/profiles'
 
 const FOR_HER = [
@@ -21,6 +22,11 @@ const FOR_HIM = [
   [Star, 'Reseñas imposibles de inventar', 'Solo existen si hubo un encuentro confirmado en persona por ambas partes.'],
   [Clock, 'Disponibilidad real', '«Disponible ahora» vence sola: nadie queda activa por olvido.'],
 ] as const
+const HOW = [
+  [Search, 'Busca sin registrarte', 'Filtra por ciudad, servicio, tarifa y quién está disponible ahora. No pedimos nombre, correo ni teléfono.'],
+  [ShieldCheck, 'Revisa antes de escribir', 'Identidad y fotos verificadas, índice de confianza y reseñas de encuentros reales, servicio por servicio.'],
+  [MessageCircle, 'Contacta directo', 'Elige servicio, adicionales, lugar y hora: el mensaje de WhatsApp sale escrito. Tratas directamente con la persona.'],
+] as const
 const STEPS = [
   [QrCode, 'Código en persona', 'Durante el encuentro, ella genera un código QR de un solo uso y él lo confirma desde su cuenta.'],
   [Star, 'Ambos califican a ciegas', 'Ninguno ve lo que escribió el otro hasta que los dos califican, o pasan 7 días. Sin represalias.'],
@@ -29,7 +35,7 @@ const STEPS = [
 
 export default async function Home() {
   const [profiles, user, encounters] = await Promise.all([
-    db.profile.findMany({ where: visibleWhere(await viewerRegion()), include: cardInclude(), take: 100 }),
+    db.profile.findMany({ where: visibleWhere(await viewer()), include: cardInclude(), take: 100 }),
     getUser(),
     db.encounter.count({ where: { confirmedAt: { not: null } } }),
   ])
@@ -48,8 +54,8 @@ export default async function Home() {
             Discreta para <em className="grad-text">ellas.</em><br />Segura para <em className="grad-text">ellos.</em>
           </h1>
           <p className="max-w-xl text-lg leading-relaxed text-mute">
-            Perfiles con identidad verificada, fotos reales y reseñas que solo existen si el encuentro ocurrió.
-            Sin estafas, sin anticipos, sin exponerte.
+            Encuentra acompañantes verificadas — mujeres, hombres y trans — y escríbeles directo por WhatsApp.
+            Sin registro, sin intermediarios y sin anticipos.
           </p>
           <form action="/explorar" className="flex max-w-lg flex-col gap-2 sm:flex-row">
             <select name="ciudad" className="input" aria-label="Ciudad" defaultValue="">
@@ -91,6 +97,30 @@ export default async function Home() {
           )))}
         </div>
       </div>
+
+      <section className="container-page space-y-4 pt-10">
+        <p className="eyebrow">Historias de hoy</p>
+        <StoriesBar />
+      </section>
+
+      <section className="container-page space-y-8 pt-16">
+        <Reveal className="max-w-2xl space-y-3">
+          <p className="eyebrow">Cómo funciona</p>
+          <h2 className="display text-4xl md:text-5xl">De la búsqueda al contacto en <em className="grad-text">un minuto</em></h2>
+        </Reveal>
+        <Stagger className="grid gap-5 md:grid-cols-3">
+          {HOW.map(([Icon, t, d], i) => (
+            <StaggerItem key={t} className="card card-hover space-y-4">
+              <div className="flex items-center justify-between">
+                <span className="grid size-12 place-items-center rounded-2xl bg-gradient-to-br from-rose/25 to-peach/15"><Icon className="size-6 text-rose" /></span>
+                <span className="display text-5xl text-white/10">0{i + 1}</span>
+              </div>
+              <h3 className="text-lg font-semibold">{t}</h3>
+              <p className="text-sm leading-relaxed text-mute">{d}</p>
+            </StaggerItem>
+          ))}
+        </Stagger>
+      </section>
 
       <section className="container-page grid gap-6 py-20 md:grid-cols-2">
         {([['Si anuncias', 'Privacidad', FOR_HER], ['Si buscas', 'Seguridad', FOR_HIM]] as const).map(([eyebrow, title, items], i) => (

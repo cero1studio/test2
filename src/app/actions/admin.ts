@@ -40,7 +40,10 @@ export async function reviewPhoto(id: string, approve: boolean) {
   const photo = await db.photo.findUnique({ where: { id } })
   if (!photo) return
   if (approve) {
-    await db.photo.update({ where: { id }, data: { status: 'APPROVED' } })
+    await db.photo.update({
+      where: { id },
+      data: { status: 'APPROVED', ...(photo.kind === 'STORY' && { expiresAt: new Date(Date.now() + 864e5) }) },
+    })
   } else {
     await db.photo.delete({ where: { id } })
     await deleteImage(photo.file, photo.blurFile)

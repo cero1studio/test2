@@ -1,11 +1,11 @@
-import { BadgeCheck, CalendarClock, Lock, QrCode } from 'lucide-react'
+import { BadgeCheck, CalendarClock, Home, Lock, MapPin, QrCode, Star } from 'lucide-react'
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { cache } from 'react'
 import { submitReport } from '@/app/actions/public'
 import { ActionForm } from '@/components/ActionForm'
-import { ContactReveal } from '@/components/ContactReveal'
+import { ContactBuilder } from '@/components/ContactBuilder'
 import { Reveal } from '@/components/motion'
 import { TrustBreakdown, TrustRing } from '@/components/TrustRing'
 import { Availability, Badges, Stars } from '@/components/ui'
@@ -13,8 +13,9 @@ import { getUser } from '@/lib/auth'
 import { scheduleLabel } from '@/lib/availability'
 import { copFormat, monthFormat, REPORT_REASONS } from '@/lib/constants'
 import { db } from '@/lib/db'
-import { viewerRegion } from '@/lib/geo'
-import { cardInclude, isBlockedIn, isPublic, releasedReviewWhere, trustOf } from '@/lib/profiles'
+import { viewer } from '@/lib/geo'
+import { parseList, serviceLabel, serviceScores } from '@/lib/services'
+import { cardInclude, isHiddenFrom, isPublic, releasedReviewWhere, trustOf } from '@/lib/profiles'
 
 type Props = { params: Promise<{ slug: string }> }
 
@@ -23,7 +24,7 @@ const load = cache(async (slug: string) => {
   if (!p) return null
   const user = await getUser()
   if (user?.role === 'ADMIN' || user?.id === p.userId) return { p, user, preview: !isPublic(p) }
-  return isPublic(p) && !isBlockedIn(p, await viewerRegion()) ? { p, user, preview: false } : null
+  return isPublic(p) && !isHiddenFrom(p, await viewer()) ? { p, user, preview: false } : null
 })
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
@@ -53,6 +54,10 @@ export default async function ProfilePage({ params }: Props) {
   const avg = reviews.length ? reviews.reduce((s, r) => s + r.rating, 0) / reviews.length : null
   const locked = p.discreet && !user
   const schedule = scheduleLabel(p)
+  const offered = parseList(p.services)
+  const scores = serviceScores(offered, reviews)
+  let extras: { label: string; price: number }[] = []
+  try { extras = JSON.parse(p.extras) } catch { /* sin adicionales */ }
 
   return (
     <div className="container-page grid gap-8 py-8 lg:grid-cols-[1fr_22rem]">
@@ -101,8 +106,30 @@ export default async function ProfilePage({ params }: Props) {
         <section className="card space-y-3">
           <h2 className="h-section">Sobre mí</h2>
           <p className="text-sm leading-relaxed whitespace-pre-line text-cream/85">{p.description}</p>
-          {schedule && <p className="flex items-center gap-2 border-t border-white/8 pt-3 text-sm text-mute"><CalendarClock className="size-4" />Horario habitual: {schedule}</p>}
+          <ul className="space-y-2 border-t border-white/8 pt-3 text-sm text-mute">
+            {schedule && <li className="flex items-center gap-2"><CalendarClock className="size-4" />Horario habitual: {schedule}</li>}
+            {p.incall && <li className="flex items-center gap-2"><Home className="size-4" />Atiende en lugar propio</li>}
+            {p.outcall && <li className="flex items-center gap-2"><MapPin className="size-4" />Va a domicilio u hotel</li>}
+            {p.kind === 'AGENCY' && <li className="text-amber">Este perfil lo publica una agencia o establecimiento, no una persona independiente.</li>}
+          </ul>
         </section>
+
+        {scores.length > 0 && (
+          <section className="card space-y-4">
+            <div><h2 className="h-section">Calificación por servicio</h2><p className="text-xs text-mute">Cada cliente califica solo los servicios que tomó, en encuentros verificados.</p></div>
+            <ul className="space-y-3">
+              {scores.map((sc) => (
+                <li key={sc.key} className="grid grid-cols-[1fr_auto] items-center gap-x-4 gap-y-1.5 text-sm">
+                  <span>{sc.label}</span>
+                  <span className="flex items-center gap-1 text-xs text-mute tabular-nums">
+                    {sc.count ? <><Star className="size-3.5 fill-amber text-amber" /><strong className="text-cream">{sc.average.toFixed(1)}</strong> · {sc.count} {sc.count === 1 ? 'reseña' : 'reseñas'}</> : 'Sin calificar aún'}
+                  </span>
+                  <span className="col-span-2 h-1.5 overflow-hidden rounded-full bg-white/8"><span className="block h-full rounded-full bg-gradient-to-r from-rose to-peach" style={{ width: `${(sc.average / 5) * 100}%` }} /></span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
         <section className="space-y-4">
           <h2 className="display text-3xl">Reseñas verificadas <span className="text-xl text-mute">({reviews.length})</span></h2>
@@ -120,6 +147,14 @@ export default async function ProfilePage({ params }: Props) {
                 {hidden
                   ? <p className="flex items-center gap-2 text-sm text-mute"><Lock className="size-4" />Reseña privada: el texto solo lo ven miembros con cuenta.</p>
                   : <p className="text-sm leading-relaxed text-cream/85">{r.body}</p>}
+                {(() => {
+                  let sr: Record<string, number> = {}
+                  try { sr = JSON.parse(r.serviceRatings) } catch { /* sin detalle */ }
+                  const items = Object.entries(sr)
+                  return items.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">{items.map(([k, v]) => <span key={k} className="chip">{serviceLabel(k)} <strong className="text-amber">★ {v}</strong></span>)}</div>
+                  )
+                })()}
                 <Link href={`/verificar/${r.encounter.publicId}`} className="inline-flex items-center gap-1.5 text-xs text-mint hover:underline">
                   <BadgeCheck className="size-3.5" />Encuentro verificado · <span className="font-mono">{r.encounter.publicId}</span>
                 </Link>
@@ -134,7 +169,8 @@ export default async function ProfilePage({ params }: Props) {
           <div><p className="text-xs text-mute">Tarifa desde</p><p className="display text-4xl">{copFormat.format(p.priceFrom)}</p></div>
           {!isPublic(p) ? <p className="text-sm text-mute">Contacto no disponible.</p>
             : locked ? <Link href={`/ingresar?next=/p/${p.slug}`} className="btn btn-primary w-full"><Lock className="size-4" />Ingresa para ver el contacto</Link>
-            : <ContactReveal profileId={p.id} name={p.displayName} />}
+            : <ContactBuilder profileId={p.id} name={p.displayName} priceFrom={p.priceFrom} incall={p.incall} outcall={p.outcall} extras={extras}
+                services={offered.map((k) => ({ key: k, label: serviceLabel(k) }))} />}
           <p className="flex gap-2 text-xs leading-relaxed text-mute"><QrCode className="size-4 shrink-0" />Al terminar, pídele su código de encuentro para dejar una reseña verificada.</p>
         </div>
         <div className="card space-y-5">

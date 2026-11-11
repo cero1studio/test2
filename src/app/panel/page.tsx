@@ -1,11 +1,11 @@
-import { BadgeCheck, CalendarClock, Camera, EyeOff, Power, QrCode, ShieldCheck, Star, UserRound } from 'lucide-react'
+import { BadgeCheck, CalendarClock, Camera, CircleFadingPlus, EyeOff, Power, QrCode, ShieldCheck, Star, UserRound } from 'lucide-react'
 import type { Metadata } from 'next'
 import { headers } from 'next/headers'
 import Link from 'next/link'
 import QRCode from 'qrcode'
 import {
   deletePhoto, openEncounter, rateClient, savePrivacy, saveProfile, saveSchedule, setAvailability, setPublished,
-  submitVerification, uploadPhoto,
+  submitVerification, uploadPhoto, uploadStory,
 } from '@/app/actions/profile'
 import { goToEncounter, submitReview } from '@/app/actions/public'
 import { ActionForm } from '@/components/ActionForm'
@@ -17,6 +17,7 @@ import { CATEGORIES, CITIES, dateFormat, DAYS, hourLabel, SITE_URL, timeFormat }
 import { db } from '@/lib/db'
 import { RATE_WINDOW_DAYS } from '@/lib/profiles'
 import { REGIONS } from '@/lib/regions'
+import { parseList, serviceLabel, SERVICES } from '@/lib/services'
 
 export const metadata: Metadata = { title: 'Mi cuenta', robots: { index: false } }
 
@@ -39,15 +40,15 @@ const Section = ({ icon: Icon, title, children, id }: { icon: typeof Star; title
   </section>
 )
 
-export default async function Panel({ searchParams }: { searchParams: Promise<{ encuentro?: string; sello?: string; calificado?: string }> }) {
+export default async function Panel({ searchParams }: { searchParams: Promise<{ encuentro?: string; sello?: string; calificado?: string; nueva?: string }> }) {
   const user = await requireUser()
   const q = await searchParams
   if (user.role === 'ADVERTISER') return <AdvertiserPanel userId={user.id} rated={q.calificado === '1'} />
   if (user.role === 'ADMIN') return <div className="container-page py-12"><Link href="/admin" className="btn btn-primary">Ir a moderación</Link></div>
-  return <ClientPanel userId={user.id} handle={user.handle} justConfirmed={q.encuentro === 'ok'} seal={/^ENC-[A-Z0-9]+$/.test(q.sello ?? '') ? q.sello : undefined} />
+  return <ClientPanel userId={user.id} handle={user.handle} justConfirmed={q.encuentro === 'ok'} seal={/^ENC-[A-Z0-9]+$/.test(q.sello ?? '') ? q.sello : undefined} anonymous={!user.email} isNew={q.nueva === '1'} />
 }
 
-async function ClientPanel({ userId, handle, justConfirmed, seal }: { userId: string; handle: string; justConfirmed: boolean; seal?: string }) {
+async function ClientPanel({ userId, handle, justConfirmed, seal, anonymous, isNew }: { userId: string; handle: string; justConfirmed: boolean; seal?: string; anonymous: boolean; isNew: boolean }) {
   const [pending, reviews, stats, base] = await Promise.all([
     db.encounter.findMany({ where: { clientId: userId, review: null, confirmedAt: { gt: rateWindow() } }, include: { profile: true }, orderBy: { confirmedAt: 'desc' } }),
     db.review.findMany({ where: { authorId: userId }, include: { profile: true, encounter: true }, orderBy: { createdAt: 'desc' } }),
@@ -59,6 +60,11 @@ async function ClientPanel({ userId, handle, justConfirmed, seal }: { userId: st
     <div className="container-page grid gap-6 py-10 lg:grid-cols-[1fr_22rem]">
       <div className="space-y-6">
         <header className="space-y-2"><p className="eyebrow">Mi cuenta</p><h1 className="display text-4xl">Hola, <em className="grad-text">{handle}</em></h1></header>
+        {anonymous && (
+          <p className={`rounded-2xl border px-4 py-3 text-sm ${isNew ? 'border-amber/30 bg-amber/10 text-amber' : 'border-white/10 text-mute'}`}>
+            Cuenta anónima. Para volver a entrar usa tu alias <strong className="font-mono text-cream">{handle}</strong> y tu contraseña. Guárdalos: sin correo no hay forma de recuperar la cuenta.
+          </p>
+        )}
         {justConfirmed && <p role="status" className="rounded-2xl border border-mint/30 bg-mint/10 px-4 py-3 text-sm text-mint">Encuentro confirmado. Ya puedes dejar tu reseña verificada aquí abajo.</p>}
 
         {seal && <p role="status" className="rounded-2xl border border-mint/30 bg-mint/10 px-4 py-3 text-sm text-mint">Reseña guardada con el sello <Link href={`/verificar/${seal}`} className="font-mono underline">{seal}</Link>. Se publica cuando la otra parte también califique, o en 7 días.</p>}
@@ -78,6 +84,20 @@ async function ClientPanel({ userId, handle, justConfirmed, seal }: { userId: st
               <StarsInput />
               <label className="flex items-center gap-2.5 text-sm"><input type="checkbox" name="photosMatch" defaultChecked className="check" />Es la persona de las fotos</label>
               <label className="flex items-center gap-2.5 text-sm"><input type="checkbox" name="askedDeposit" className="check" />Me pidió anticipo o depósito</label>
+              {parseList(e.profile.services).length > 0 && (
+                <fieldset className="space-y-2"><legend className="label">Califica los servicios que tomaste</legend>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {parseList(e.profile.services).map((k) => (
+                      <label key={k} className="flex items-center justify-between gap-3 rounded-xl border border-white/8 px-3 py-2 text-sm">
+                        {serviceLabel(k)}
+                        <select name={`svc_${k}`} className="rounded-lg bg-black/40 px-2 py-1 text-xs" defaultValue="" aria-label={`Calificación de ${serviceLabel(k)}`}>
+                          <option value="">No lo tomé</option>{[5, 4, 3, 2, 1].map((n) => <option key={n} value={n}>{'★'.repeat(n)}</option>)}
+                        </select>
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+              )}
               <label className="block"><span className="label">Tu experiencia</span>
                 <textarea name="body" className="input" rows={4} required minLength={20} maxLength={1500} placeholder="Puntualidad, trato, si coincidía con el anuncio…" />
               </label>
@@ -142,7 +162,7 @@ async function AdvertiserPanel({ userId, rated }: { userId: string; rated: boole
         origin(),
       ])
     : [null, [], '']
-  const approved = p?.photos.filter((ph) => ph.status === 'APPROVED').length ?? 0
+  const approved = p?.photos.filter((ph) => ph.status === 'APPROVED' && ph.kind === 'GALLERY').length ?? 0
   const lastV = p?.verifications[0]
   const canPublish = !!p?.identityVerifiedAt && approved > 0
   const steps: [string, boolean][] = [
@@ -151,6 +171,11 @@ async function AdvertiserPanel({ userId, rated }: { userId: string; rated: boole
   ]
   const blocked = p?.blockedRegions.split(',').filter(Boolean) ?? []
   const days = p?.scheduleDays.split(',').filter(Boolean) ?? []
+  const offered = p ? parseList(p.services) : []
+  let extras: { label: string; price: number }[] = []
+  try { extras = JSON.parse(p?.extras ?? '[]') } catch { /* sin adicionales */ }
+  const gallery = p?.photos.filter((ph) => ph.kind === 'GALLERY') ?? []
+  const stories = p?.photos.filter((ph) => ph.kind === 'STORY' && (ph.status === 'PENDING' || (ph.expiresAt && ph.expiresAt > now))) ?? []
 
   return (
     <div className="container-page grid gap-6 py-10 lg:grid-cols-[1fr_22rem]">
@@ -215,6 +240,39 @@ async function AdvertiserPanel({ userId, rated }: { userId: string; rated: boole
             <label><span className="label">Tarifa desde (COP)</span><input name="priceFrom" type="number" min={10000} step={10000} className="input" required defaultValue={p?.priceFrom} /></label>
             <label className="sm:col-span-2"><span className="label">WhatsApp (con indicativo, solo números)</span><input name="whatsapp" className="input" required defaultValue={p?.whatsapp} placeholder="573001234567" inputMode="tel" /></label>
             <label className="sm:col-span-2"><span className="label">Descripción</span><textarea name="description" className="input" rows={5} required minLength={40} maxLength={2000} defaultValue={p?.description} /></label>
+            <fieldset className="grid grid-cols-2 gap-2 text-sm sm:col-span-2">
+              <legend className="label">¿Quién publica?</legend>
+              {[['INDEPENDENT', 'Soy independiente', 'Anuncio por mi cuenta.'], ['AGENCY', 'Agencia o establecimiento', 'Se mostrará claramente en el perfil.']].map(([v, t, d]) => (
+                <label key={v} className="cursor-pointer rounded-2xl border border-white/10 p-3.5 transition has-checked:border-rose has-checked:bg-rose/10">
+                  <input type="radio" name="kind" value={v} defaultChecked={(p?.kind ?? 'INDEPENDENT') === v} className="sr-only" />
+                  <span className="font-semibold">{t}</span><span className="block text-xs text-mute">{d}</span>
+                </label>
+              ))}
+            </fieldset>
+            <fieldset className="space-y-2 sm:col-span-2">
+              <legend className="label">Servicios que ofreces</legend>
+              <div className="flex flex-wrap gap-2">
+                {SERVICES.map((sv) => (
+                  <label key={sv.key} className="cursor-pointer rounded-full border border-white/10 px-3 py-1.5 text-xs font-medium text-mute transition has-checked:border-rose has-checked:bg-rose/15 has-checked:text-rose">
+                    <input type="checkbox" name="service" value={sv.key} defaultChecked={offered.includes(sv.key)} className="sr-only" />{sv.label}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+            <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm sm:col-span-2">
+              <label className="flex cursor-pointer items-center gap-2.5"><input type="checkbox" name="incall" defaultChecked={p?.incall} className="check" />Tengo lugar propio</label>
+              <label className="flex cursor-pointer items-center gap-2.5"><input type="checkbox" name="outcall" defaultChecked={p?.outcall} className="check" />Voy a domicilio u hotel</label>
+            </div>
+            <fieldset className="space-y-2 sm:col-span-2">
+              <legend className="label">Adicionales (nombre y precio extra; 0 = incluido)</legend>
+              <p className="text-xs text-mute">Tu cliente los elige en tu perfil y te llegan escritos en el primer mensaje de WhatsApp, junto con el servicio, el lugar y el horario.</p>
+              {Array.from({ length: 6 }, (_, i) => (
+                <div key={i} className="grid grid-cols-[1fr_8rem] gap-2">
+                  <input name="extraLabel" className="input" maxLength={40} defaultValue={extras[i]?.label} placeholder={['Hora adicional', 'Ducha juntos', 'Lencería a elección', '', '', ''][i]} aria-label={`Adicional ${i + 1}`} />
+                  <input name="extraPrice" type="number" min={0} step={1000} className="input" defaultValue={extras[i]?.price || ''} placeholder="Precio" aria-label={`Precio del adicional ${i + 1}`} />
+                </div>
+              ))}
+            </fieldset>
           </ActionForm>
         </Section>
 
@@ -226,8 +284,8 @@ async function AdvertiserPanel({ userId, rated }: { userId: string; rated: boole
                 <span><span className="font-semibold">Modo discreto</span><span className="mt-1 block text-sm text-mute">Quien no tenga cuenta verá tus fotos difuminadas y no podrá ver tu contacto. Tu perfil tampoco aparecerá en Google.</span></span>
               </label>
               <label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-white/10 p-4 transition has-checked:border-rose has-checked:bg-rose/10">
-                <input type="checkbox" name="onlyAbroad" defaultChecked={blocked.length === REGIONS.length - 1 && !blocked.includes('EXT')} className="check mt-0.5" />
-                <span><span className="font-semibold">Solo visible fuera de Colombia</span><span className="mt-1 block text-sm text-mute">Tu perfil solo aparecerá a quien navegue desde otro país. Ojo: un extranjero que ya está en Colombia navega con conexión colombiana y no te verá.</span></span>
+                <input type="checkbox" name="foreignersOnly" defaultChecked={p.foreignersOnly} className="check mt-0.5" />
+                <span><span className="font-semibold">Solo para visitantes extranjeros</span><span className="mt-1 block text-sm text-mute">Tu perfil solo aparece a quien navega desde otro país o tiene su teléfono o navegador en un idioma distinto al español (así también te ve un turista que ya está en Colombia). Es un filtro por indicios, no una garantía: confirma siempre por chat.</span></span>
               </label>
               <fieldset className="space-y-3">
                 <legend className="label">Dónde NO quieres aparecer</legend>
@@ -246,7 +304,7 @@ async function AdvertiserPanel({ userId, rated }: { userId: string; rated: boole
           <Section icon={Camera} title="Fotos" id="fotos">
             <p className="text-sm text-mute">Eliminamos la ubicación y demás metadatos de cada foto y le ponemos una marca de agua para que no la usen en perfiles falsos. Se publican tras la revisión de moderación.</p>
             <div className="grid grid-cols-3 gap-3 md:grid-cols-4">
-              {p.photos.map((ph) => (
+              {gallery.map((ph) => (
                 <div key={ph.id} className="space-y-1.5">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={`/media/${ph.id}`} alt="" className="aspect-[4/5] w-full rounded-2xl border border-white/8 object-cover" />
@@ -258,6 +316,27 @@ async function AdvertiserPanel({ userId, rated }: { userId: string; rated: boole
               ))}
             </div>
             <ActionForm action={uploadPhoto} submit="Subir foto" buttonClass="btn btn-sm" className="flex flex-wrap items-center gap-3">
+              <input type="file" name="photo" accept="image/*" required className="text-sm file:mr-3 file:cursor-pointer file:rounded-full file:border-0 file:bg-white/10 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-cream" />
+            </ActionForm>
+          </Section>
+        )}
+
+        {p?.identityVerifiedAt && (
+          <Section icon={CircleFadingPlus} title="Historias" id="historias">
+            <p className="text-sm text-mute">Una foto del día que aparece arriba en inicio y explorar durante 24 horas. Sirve para mostrar que estás activa hoy. Máximo 5 a la vez; pasan por moderación.</p>
+            {stories.length > 0 && (
+              <div className="flex flex-wrap gap-3">
+                {stories.map((st) => (
+                  <div key={st.id} className="w-20 space-y-1 text-center text-[0.65rem]">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={`/media/${st.id}`} alt="" className="aspect-[9/16] w-full rounded-xl border border-white/8 object-cover" />
+                    <span className={st.status === 'APPROVED' ? 'text-mint' : 'text-amber'}>{st.status === 'APPROVED' ? `Hasta ${timeFormat.format(st.expiresAt!)}` : 'En revisión'}</span>
+                    <form action={deletePhoto.bind(null, st.id)}><button className="cursor-pointer text-rose hover:underline">Eliminar</button></form>
+                  </div>
+                ))}
+              </div>
+            )}
+            <ActionForm action={uploadStory} submit="Publicar historia" buttonClass="btn btn-sm" className="flex flex-wrap items-center gap-3">
               <input type="file" name="photo" accept="image/*" required className="text-sm file:mr-3 file:cursor-pointer file:rounded-full file:border-0 file:bg-white/10 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-cream" />
             </ActionForm>
           </Section>
