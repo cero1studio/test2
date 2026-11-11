@@ -8,14 +8,17 @@ generator client {
 }
 
 model User {
-  id           String    @id @default(cuid())
-  email        String    @unique
+  id           String         @id @default(cuid())
+  email        String         @unique
   passwordHash String
-  role         String    @default("CLIENT") // CLIENT | ADVERTISER | ADMIN
-  createdAt    DateTime  @default(now())
+  role         String         @default("CLIENT") // CLIENT | ADVERTISER | ADMIN
+  handle       String         @unique // alias anónimo; nunca se muestra el correo
+  createdAt    DateTime       @default(now())
   sessions     Session[]
   profile      Profile?
+  encounters   Encounter[]
   reviews      Review[]
+  ratings      ClientRating[]
   reports      Report[]
 }
 
@@ -41,16 +44,24 @@ model Profile {
   whatsapp           String
   status             String         @default("DRAFT") // DRAFT | ACTIVE | PAUSED | REVIEW | SUSPENDED
   verifyCode         String
-  // Códigos de región donde el perfil NO se muestra, con comas a ambos lados: ",ANT,EXT,"
-  blockedRegions     String         @default("")
+  // Privacidad
+  discreet           Boolean        @default(false) // fotos difuminadas y contacto oculto para quien no tiene cuenta
+  blockedRegions     String         @default("") // ",ANT,EXT," regiones donde NO se muestra
+  // Disponibilidad: "ahora" siempre vence sola; el horario es informativo
+  availableUntil     DateTime?
+  lastSeenAt         DateTime?
+  scheduleDays       String         @default("") // ",1,2,3," (0 = domingo)
+  scheduleFrom       Int            @default(0) // hora 0-23, hora de Colombia
+  scheduleTo         Int            @default(0)
   identityVerifiedAt DateTime?
   photosVerifiedAt   DateTime?
   createdAt          DateTime       @default(now())
   updatedAt          DateTime       @updatedAt
   photos             Photo[]
   verifications      Verification[]
-  reviewCodes        ReviewCode[]
+  encounters         Encounter[]
   reviews            Review[]
+  clientRatings      ClientRating[]
   reports            Report[]
 
   @@index([city, category, status])
@@ -60,8 +71,9 @@ model Photo {
   id        String   @id @default(cuid())
   profileId String
   profile   Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
-  file      String
-  status    String   @default("PENDING") // PENDING | APPROVED | REJECTED
+  file      String // nítida, con marca de agua
+  blurFile  String // versión difuminada en el servidor (modo discreto)
+  status    String   @default("PENDING") // PENDING | APPROVED
   createdAt DateTime @default(now())
 }
 
@@ -71,38 +83,63 @@ model Verification {
   profile    Profile   @relation(fields: [profileId], references: [id], onDelete: Cascade)
   code       String
   docFile    String? // se elimina del disco al resolver la solicitud
-  selfieFile String? // se conserva (privada) como referencia para aprobar fotos futuras
+  selfieFile String? // se conserva en privado como referencia para aprobar fotos
   status     String    @default("PENDING") // PENDING | APPROVED | REJECTED
   note       String    @default("")
   createdAt  DateTime  @default(now())
   reviewedAt DateTime?
 }
 
-model ReviewCode {
-  id        String    @id @default(cuid())
-  profileId String
-  profile   Profile   @relation(fields: [profileId], references: [id], onDelete: Cascade)
-  code      String    @unique
-  createdAt DateTime  @default(now())
-  expiresAt DateTime
-  usedAt    DateTime?
-  review    Review?
+// Un encuentro existe cuando la anunciante genera un código en persona y el
+// cliente lo confirma desde su cuenta. Es la prueba de que el servicio ocurrió.
+model Encounter {
+  id           String        @id @default(cuid())
+  publicId     String        @unique // sello verificable públicamente, sin identidades
+  code         String        @unique // código presencial de un solo uso
+  profileId    String
+  profile      Profile       @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  clientId     String?
+  client       User?         @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  createdAt    DateTime      @default(now())
+  expiresAt    DateTime
+  confirmedAt  DateTime?
+  review       Review?
+  clientRating ClientRating?
+
+  @@index([profileId, confirmedAt])
 }
 
 model Review {
-  id           String     @id @default(cuid())
+  id           String    @id @default(cuid())
+  encounterId  String    @unique
+  encounter    Encounter @relation(fields: [encounterId], references: [id], onDelete: Cascade)
   profileId    String
-  profile      Profile    @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  profile      Profile   @relation(fields: [profileId], references: [id], onDelete: Cascade)
   authorId     String
-  author       User       @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  codeId       String     @unique
-  code         ReviewCode @relation(fields: [codeId], references: [id])
+  author       User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
   rating       Int
   photosMatch  Boolean
   askedDeposit Boolean
   body         String
-  status       String     @default("VISIBLE") // VISIBLE | HIDDEN
-  createdAt    DateTime   @default(now())
+  visibility   String    @default("MEMBERS") // MEMBERS (solo con cuenta) | PUBLIC
+  status       String    @default("VISIBLE") // VISIBLE | HIDDEN
+  createdAt    DateTime  @default(now())
+}
+
+// Calificación de la anunciante al cliente: reputación que protege a las demás.
+model ClientRating {
+  id           String    @id @default(cuid())
+  encounterId  String    @unique
+  encounter    Encounter @relation(fields: [encounterId], references: [id], onDelete: Cascade)
+  clientId     String
+  client       User      @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  profileId    String
+  profile      Profile   @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  rating       Int
+  respectful   Boolean
+  paidAsAgreed Boolean
+  punctual     Boolean
+  createdAt    DateTime  @default(now())
 }
 
 model Report {

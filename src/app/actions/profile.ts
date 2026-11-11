@@ -1,13 +1,14 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import { redirect } from 'next/navigation'
 import { z } from 'zod'
 import { requireUser } from '@/lib/auth'
 import { CATEGORIES, CITIES, type ActionState } from '@/lib/constants'
-import { REGIONS } from '@/lib/regions'
 import { db } from '@/lib/db'
-import { randomCode, slugify } from '@/lib/profiles'
-import { deleteImage, saveImage } from '@/lib/storage'
+import { RATE_WINDOW_DAYS, randomCode, slugify } from '@/lib/profiles'
+import { REGIONS } from '@/lib/regions'
+import { deleteImage, saveImage, savePhoto } from '@/lib/storage'
 
 const profileSchema = z.object({
   displayName: z.string().trim().min(2, 'Nombre muy corto.').max(40),
@@ -29,18 +30,15 @@ export async function saveProfile(_: ActionState, fd: FormData): Promise<ActionS
   const { user, profile } = await ownProfile()
   const parsed = profileSchema.safeParse(Object.fromEntries(fd))
   if (!parsed.success) return { error: parsed.error.issues[0].message }
-  const blocked = fd.getAll('blocked').filter((c) => REGIONS.some((r) => r.code === c))
-  const data = { ...parsed.data, blockedRegions: blocked.length ? `,${blocked.join(',')},` : '' }
   if (profile) {
-    await db.profile.update({ where: { id: profile.id }, data })
-    revalidatePath(`/p/${profile.slug}`)
+    await db.profile.update({ where: { id: profile.id }, data: parsed.data })
   } else {
     await db.profile.create({
       data: {
-        ...data,
+        ...parsed.data,
         userId: user.id,
         slug: `${slugify(parsed.data.displayName) || 'perfil'}-${randomCode(5).toLowerCase()}`,
-        verifyCode: `VRZ-${randomCode(5)}`,
+        verifyCode: `SGL-${randomCode(5)}`,
       },
     })
   }
@@ -48,12 +46,49 @@ export async function saveProfile(_: ActionState, fd: FormData): Promise<ActionS
   return { ok: 'Perfil guardado.' }
 }
 
+export async function savePrivacy(_: ActionState, fd: FormData): Promise<ActionState> {
+  const { profile } = await ownProfile()
+  if (!profile) return { error: 'Primero guarda tu perfil.' }
+  const blocked = fd.getAll('blocked').filter((c) => REGIONS.some((r) => r.code === c))
+  await db.profile.update({
+    where: { id: profile.id },
+    data: { discreet: fd.get('discreet') === 'on', blockedRegions: blocked.length ? `,${blocked.join(',')},` : '' },
+  })
+  revalidatePath('/panel')
+  return { ok: 'Privacidad actualizada. Aplica de inmediato.' }
+}
+
+export async function saveSchedule(_: ActionState, fd: FormData): Promise<ActionState> {
+  const { profile } = await ownProfile()
+  if (!profile) return { error: 'Primero guarda tu perfil.' }
+  const days = fd.getAll('day').map(Number).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6)
+  const hour = (k: string) => Math.min(23, Math.max(0, Math.trunc(Number(fd.get(k))) || 0))
+  await db.profile.update({
+    where: { id: profile.id },
+    data: { scheduleDays: days.length ? `,${days.join(',')},` : '', scheduleFrom: hour('from'), scheduleTo: hour('to') },
+  })
+  revalidatePath('/panel')
+  return { ok: 'Horario guardado.' }
+}
+
+/** hours = 0 apaga la disponibilidad. Siempre vence sola (máximo 12 h). */
+export async function setAvailability(hours: number) {
+  const { profile } = await ownProfile()
+  if (!profile) return
+  const h = Math.min(12, Math.max(0, Math.trunc(hours)))
+  await db.profile.update({
+    where: { id: profile.id },
+    data: { availableUntil: h ? new Date(Date.now() + h * 3600_000) : null, lastSeenAt: new Date() },
+  })
+  revalidatePath('/panel')
+}
+
 export async function uploadPhoto(_: ActionState, fd: FormData): Promise<ActionState> {
   const { profile } = await ownProfile()
   if (!profile) return { error: 'Primero guarda tu perfil.' }
   if ((await db.photo.count({ where: { profileId: profile.id } })) >= 12) return { error: 'Máximo 12 fotos.' }
   try {
-    await db.photo.create({ data: { profileId: profile.id, file: await saveImage(fd.get('photo')) } })
+    await db.photo.create({ data: { profileId: profile.id, ...(await savePhoto(fd.get('photo'))) } })
   } catch (e) {
     return { error: (e as Error).message }
   }
@@ -66,7 +101,7 @@ export async function deletePhoto(photoId: string) {
   const photo = await db.photo.findFirst({ where: { id: photoId, profileId: profile?.id ?? '' } })
   if (!photo) return
   await db.photo.delete({ where: { id: photo.id } })
-  await deleteImage(photo.file)
+  await deleteImage(photo.file, photo.blurFile)
   revalidatePath('/panel')
 }
 
@@ -76,7 +111,7 @@ export async function submitVerification(_: ActionState, fd: FormData): Promise<
   if (await db.verification.findFirst({ where: { profileId: profile.id, status: 'PENDING' } })) {
     return { error: 'Ya tienes una solicitud en revisión.' }
   }
-  if (fd.get('consent') !== 'on') return { error: 'Debes aceptar el tratamiento de tus datos para verificarte.' }
+  if (fd.get('consent') !== 'on') return { error: 'Debes autorizar el tratamiento de tus datos para verificarte.' }
   let docFile: string | undefined
   try {
     docFile = await saveImage(fd.get('doc'))
@@ -97,24 +132,50 @@ export async function setPublished(publish: boolean) {
     const approved = await db.photo.count({ where: { profileId: profile.id, status: 'APPROVED' } })
     if (!profile.identityVerifiedAt || approved === 0) return
   }
-  await db.profile.update({ where: { id: profile.id }, data: { status: publish ? 'ACTIVE' : 'PAUSED' } })
+  await db.profile.update({
+    where: { id: profile.id },
+    data: { status: publish ? 'ACTIVE' : 'PAUSED', ...(!publish && { availableUntil: null }) },
+  })
   revalidatePath('/panel')
 }
 
-export async function createReviewCode() {
+/** Código presencial: la anunciante lo muestra al cliente durante el encuentro. */
+export async function openEncounter() {
   const { profile } = await ownProfile()
   if (!profile?.identityVerifiedAt) return
-  const today = await db.reviewCode.count({
-    where: { profileId: profile.id, createdAt: { gt: new Date(Date.now() - 864e5) } },
-  })
-  if (today >= 5) return
-  const raw = randomCode(8)
-  await db.reviewCode.create({
+  const now = new Date()
+  const active = await db.encounter.findFirst({ where: { profileId: profile.id, clientId: null, expiresAt: { gt: now } } })
+  const today = await db.encounter.count({ where: { profileId: profile.id, createdAt: { gt: new Date(now.getTime() - 864e5) } } })
+  if (active || today >= 8) return
+  await db.encounter.create({
     data: {
       profileId: profile.id,
-      code: `${raw.slice(0, 4)}-${raw.slice(4)}`,
-      expiresAt: new Date(Date.now() + 7 * 864e5),
+      code: randomCode(6),
+      publicId: `ENC-${randomCode(7)}`,
+      expiresAt: new Date(now.getTime() + 15 * 60_000),
     },
   })
   revalidatePath('/panel')
+}
+
+export async function rateClient(encounterId: string, _: ActionState, fd: FormData): Promise<ActionState> {
+  const { profile } = await ownProfile()
+  const rating = Math.trunc(Number(fd.get('rating')))
+  if (!profile || !(rating >= 1 && rating <= 5)) return { error: 'Elige una calificación.' }
+  const enc = await db.encounter.findFirst({
+    where: {
+      id: encounterId, profileId: profile.id, clientId: { not: null }, clientRating: null,
+      confirmedAt: { gt: new Date(Date.now() - RATE_WINDOW_DAYS * 864e5) },
+    },
+  })
+  if (!enc?.clientId) return { error: 'Este encuentro ya no se puede calificar.' }
+  await db.clientRating.create({
+    data: {
+      encounterId: enc.id, clientId: enc.clientId, profileId: profile.id, rating,
+      respectful: fd.get('respectful') === 'on',
+      paidAsAgreed: fd.get('paidAsAgreed') === 'on',
+      punctual: fd.get('punctual') === 'on',
+    },
+  })
+  redirect('/panel?calificado=1')
 }

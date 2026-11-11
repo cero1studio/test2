@@ -1,81 +1,108 @@
-// Datos de demostración. Los "retratos" son degradados generados: no hay fotos de personas reales.
+// Datos de demostración. Los "retratos" son ilustraciones generadas: no hay fotos de personas reales.
 import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
-import { saveBuffer } from '../src/lib/storage'
+import { savePhoto } from '../src/lib/storage'
 
 const db = new PrismaClient()
-const days = (n: number) => new Date(Date.now() - n * 864e5)
+const ago = (d: number, h = 0) => new Date(Date.now() - d * 864e5 - h * 36e5)
+const inHours = (h: number) => new Date(Date.now() + h * 36e5)
+const deburr = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
 
-const DEMO = [
-  { name: 'Valentina', age: 26, city: 'Bogotá', zone: 'Chapinero', cat: 'Mujeres', price: 250000, hue: 330, months: 9, photos: true, reviews: [5, 5, 4, 5, 5, 5], blocked: '' },
-  { name: 'Camila', age: 29, city: 'Medellín', zone: 'El Poblado', cat: 'Mujeres', price: 300000, hue: 280, months: 5, photos: true, reviews: [5, 4, 5], blocked: ',VAC,EXT,' },
-  { name: 'Sara', age: 24, city: 'Cali', zone: 'Granada', cat: 'Mujeres', price: 180000, hue: 20, months: 2, photos: true, reviews: [4, 5], blocked: '' },
-  { name: 'Mateo', age: 31, city: 'Bogotá', zone: 'Usaquén', cat: 'Hombres', price: 220000, hue: 200, months: 7, photos: true, reviews: [5, 5, 5, 4], blocked: '' },
-  { name: 'Luna', age: 27, city: 'Barranquilla', zone: 'Norte', cat: 'Trans', price: 200000, hue: 160, months: 4, photos: true, reviews: [5], blocked: '' },
-  { name: 'Isabella', age: 23, city: 'Cartagena', zone: 'Bocagrande', cat: 'Mujeres', price: 350000, hue: 45, months: 1, photos: false, reviews: [], blocked: '' },
-  { name: 'Daniela', age: 30, city: 'Medellín', zone: 'Laureles', cat: 'Mujeres', price: 240000, hue: 300, months: 12, photos: true, reviews: [5, 5, 3, 5, 4, 5, 5, 5], blocked: ',DC,' },
-  { name: 'Andrés', age: 28, city: 'Pereira', zone: 'Centro', cat: 'Hombres', price: 160000, hue: 230, months: 3, photos: false, reviews: [4], blocked: '' },
+type Demo = {
+  name: string; age: number; city: string; zone: string; cat: string; price: number; hue: number; months: number
+  photos: boolean; ratings: number[]; blocked?: string; discreet?: boolean; availH?: number; seenH: number; days: string; from: number; to: number
+}
+const DEMO: Demo[] = [
+  { name: 'Valentina', age: 26, city: 'Bogotá', zone: 'Chapinero', cat: 'Mujeres', price: 250000, hue: 335, months: 9, photos: true, ratings: [5, 5, 4, 5, 5, 5], availH: 3, seenH: 0, days: ',1,2,3,4,5,6,', from: 14, to: 23 },
+  { name: 'Camila', age: 29, city: 'Medellín', zone: 'El Poblado', cat: 'Mujeres', price: 300000, hue: 275, months: 5, photos: true, ratings: [5, 4, 5], blocked: ',VAC,EXT,', discreet: true, availH: 2, seenH: 0, days: ',4,5,6,0,', from: 18, to: 2 },
+  { name: 'Sara', age: 24, city: 'Cali', zone: 'Granada', cat: 'Mujeres', price: 180000, hue: 18, months: 2, photos: true, ratings: [4, 5], seenH: 5, days: ',1,2,3,4,5,', from: 10, to: 18 },
+  { name: 'Mateo', age: 31, city: 'Bogotá', zone: 'Usaquén', cat: 'Hombres', price: 220000, hue: 205, months: 7, photos: true, ratings: [5, 5, 5, 4], availH: 6, seenH: 0, days: ',0,1,2,3,4,5,6,', from: 0, to: 0 },
+  { name: 'Luna', age: 27, city: 'Barranquilla', zone: 'Norte', cat: 'Trans', price: 200000, hue: 165, months: 4, photos: true, ratings: [5], seenH: 30, days: ',5,6,', from: 20, to: 4 },
+  { name: 'Isabella', age: 23, city: 'Cartagena', zone: 'Bocagrande', cat: 'Mujeres', price: 350000, hue: 42, months: 1, photos: false, ratings: [], seenH: 2, days: '', from: 0, to: 0 },
+  { name: 'Daniela', age: 30, city: 'Medellín', zone: 'Laureles', cat: 'Mujeres', price: 240000, hue: 305, months: 12, photos: true, ratings: [5, 5, 3, 5, 4, 5, 5, 5], blocked: ',DC,', seenH: 1, days: ',1,2,3,4,5,6,', from: 12, to: 22 },
+  { name: 'Andrés', age: 28, city: 'Pereira', zone: 'Centro', cat: 'Hombres', price: 160000, hue: 232, months: 3, photos: false, ratings: [4], seenH: 80, days: ',6,0,', from: 15, to: 23 },
+  { name: 'Mariana', age: 25, city: 'Bogotá', zone: 'Zona T', cat: 'Mujeres', price: 280000, hue: 355, months: 6, photos: true, ratings: [5, 5, 5], discreet: true, seenH: 0, availH: 1, days: ',2,3,4,5,6,', from: 16, to: 24 % 24 },
 ]
 
-const portrait = (name: string, hue: number, shift: number) =>
-  Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1000">
-  <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-    <stop offset="0" stop-color="hsl(${hue + shift} 70% 45%)"/><stop offset="1" stop-color="hsl(${hue + shift + 50} 60% 18%)"/>
-  </linearGradient></defs>
-  <rect width="800" height="1000" fill="url(#g)"/>
-  <circle cx="400" cy="400" r="150" fill="rgba(255,255,255,.18)"/>
-  <path d="M130 1000c0-190 120-320 270-320s270 130 270 320z" fill="rgba(255,255,255,.18)"/>
-  <text x="400" y="950" font-family="sans-serif" font-size="34" fill="rgba(255,255,255,.7)" text-anchor="middle">Demo · ${name}</text>
+// Ilustración abstracta: silueta sobre degradado, con grano. Variantes por foto.
+const portrait = (hue: number, v: number) => {
+  const h2 = hue + 40 + v * 18
+  return Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1125" viewBox="0 0 900 1125">
+  <defs>
+    <linearGradient id="g" x1="${v % 2}" y1="0" x2="${1 - (v % 2)}" y2="1">
+      <stop offset="0" stop-color="hsl(${hue} 78% ${52 - v * 4}%)"/><stop offset="1" stop-color="hsl(${h2} 62% 16%)"/>
+    </linearGradient>
+    <radialGradient id="l" cx="${0.3 + v * 0.2}" cy="0.25" r="0.7"><stop offset="0" stop-color="white" stop-opacity=".35"/><stop offset="1" stop-color="white" stop-opacity="0"/></radialGradient>
+    <linearGradient id="s" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="hsl(${hue} 40% 12%)" stop-opacity=".75"/><stop offset="1" stop-color="hsl(${hue} 50% 6%)" stop-opacity=".95"/></linearGradient>
+    <filter id="n"><feTurbulence type="fractalNoise" baseFrequency=".9" numOctaves="2"/><feColorMatrix values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 .09 0"/></filter>
+  </defs>
+  <rect width="900" height="1125" fill="url(#g)"/><rect width="900" height="1125" fill="url(#l)"/>
+  <g transform="translate(${v * 40 - 40} ${v * 20})" fill="url(#s)">
+    <ellipse cx="450" cy="430" rx="128" ry="150"/>
+    <path d="M300 420c-10-150 80-230 160-230s180 70 150 250c-10 70 10 190 40 250H270c40-80 40-190 30-270z" opacity=".8"/>
+    <path d="M150 1125c10-230 130-360 300-360s290 130 300 360z"/>
+  </g>
+  <rect width="900" height="1125" filter="url(#n)"/>
 </svg>`)
+}
 
 async function main() {
-  for (const m of ['review', 'reviewCode', 'report', 'verification', 'photo', 'profile', 'session', 'user'] as const) {
+  for (const m of ['clientRating', 'review', 'encounter', 'report', 'verification', 'photo', 'profile', 'session', 'user'] as const) {
     await (db[m] as { deleteMany: () => Promise<unknown> }).deleteMany()
   }
   const hash = (pw: string) => bcrypt.hash(pw, 10)
   const adminPw = process.env.SEED_ADMIN_PASSWORD ?? 'cambia-esto-123'
-  await db.user.create({ data: { email: 'admin@veraz.test', role: 'ADMIN', passwordHash: await hash(adminPw) } })
+  await db.user.create({ data: { email: 'admin@sigila.test', handle: 'moderacion', role: 'ADMIN', passwordHash: await hash(adminPw) } })
+  const clientHash = await hash('demo-cliente-123')
   const clients = await Promise.all(
-    [1, 2, 3, 4, 5, 6, 7, 8].map(async (i) =>
-      db.user.create({ data: { email: `cliente${i}@veraz.test`, role: 'CLIENT', passwordHash: await hash('demo-cliente-123') } })),
+    [1, 2, 3, 4, 5, 6, 7, 8].map((i) =>
+      db.user.create({ data: { email: `cliente${i}@sigila.test`, handle: `cliente-demo${i}`, role: 'CLIENT', passwordHash: clientHash, createdAt: ago(200 - i * 10) } })),
   )
+  const advHash = await hash('demo-anunciante-123')
+  let seq = 0
 
   for (const [i, d] of DEMO.entries()) {
-    const created = days(d.months * 30)
+    const created = ago(d.months * 30)
     const user = await db.user.create({
-      data: { email: `anunciante${i + 1}@veraz.test`, role: 'ADVERTISER', passwordHash: await hash('demo-anunciante-123'), createdAt: created },
+      data: { email: `anunciante${i + 1}@sigila.test`, handle: `perfil-demo${i + 1}`, role: 'ADVERTISER', passwordHash: advHash, createdAt: created },
     })
     const profile = await db.profile.create({
       data: {
-        userId: user.id, slug: `${d.name.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')}-demo${i + 1}`,
-        displayName: d.name, age: d.age, city: d.city, zone: d.zone, category: d.cat, priceFrom: d.price,
-        whatsapp: `57300555${String(1000 + i)}`, verifyCode: `VRZ-DEMO${i + 1}`, status: 'ACTIVE', createdAt: created,
-        blockedRegions: d.blocked,
+        userId: user.id, slug: `${deburr(d.name)}-demo${i + 1}`, displayName: d.name, age: d.age, city: d.city, zone: d.zone,
+        category: d.cat, priceFrom: d.price, whatsapp: `57300555${1000 + i}`, verifyCode: `SGL-DEMO${i + 1}`, status: 'ACTIVE',
+        createdAt: created, blockedRegions: d.blocked ?? '', discreet: !!d.discreet,
+        availableUntil: d.availH ? inHours(d.availH) : null, lastSeenAt: ago(0, d.seenH),
+        scheduleDays: d.days, scheduleFrom: d.from, scheduleTo: d.to,
         identityVerifiedAt: created, photosVerifiedAt: d.photos ? created : null,
         description: `Perfil de demostración. Acompañante independiente en ${d.city}. Trato respetuoso, puntualidad y discreción. Atiendo con cita previa; escríbeme por WhatsApp para coordinar.`,
       },
     })
-    for (const shift of [0, 25, -25]) {
-      await db.photo.create({ data: { profileId: profile.id, status: 'APPROVED', file: await saveBuffer(portrait(d.name, d.hue, shift)) } })
+    for (const v of [0, 1, 2]) {
+      await db.photo.create({ data: { profileId: profile.id, status: 'APPROVED', ...(await savePhoto(portrait(d.hue, v))) } })
     }
-    for (const [j, rating] of d.reviews.entries()) {
-      const at = days(3 + j * 9)
-      const code = await db.reviewCode.create({
-        data: { profileId: profile.id, code: `DM${i}${j}-${String(1000 + i * 10 + j)}`, createdAt: at, expiresAt: at, usedAt: at },
+    for (const [j, rating] of d.ratings.entries()) {
+      const at = ago(3 + j * 9)
+      const client = clients[(i + j) % clients.length]
+      const n = String(1000 + seq++)
+      const enc = await db.encounter.create({
+        data: { profileId: profile.id, clientId: client.id, code: `D${n}X`, publicId: `ENC-DEMO${n}`, createdAt: at, expiresAt: at, confirmedAt: at },
       })
       await db.review.create({
         data: {
-          profileId: profile.id, authorId: clients[j % clients.length].id, codeId: code.id, rating, createdAt: at,
-          photosMatch: rating >= 4, askedDeposit: false,
+          encounterId: enc.id, profileId: profile.id, authorId: client.id, rating, createdAt: at,
+          photosMatch: rating >= 4, askedDeposit: false, visibility: j % 3 === 1 ? 'MEMBERS' : 'PUBLIC',
           body: rating >= 4
             ? 'Reseña de demostración: llegó puntual, es la persona de las fotos y todo fue como se acordó. Sin anticipos.'
             : 'Reseña de demostración: buen trato, pero las fotos se veían algo distintas a la realidad.',
         },
       })
+      await db.clientRating.create({
+        data: { encounterId: enc.id, clientId: client.id, profileId: profile.id, rating: 5, respectful: true, paidAsAgreed: true, punctual: j % 4 !== 3, createdAt: at },
+      })
     }
   }
-  console.log(`Seed listo. Admin: admin@veraz.test / ${adminPw}`)
-  console.log('Cliente demo: cliente1@veraz.test / demo-cliente-123 · Anunciante demo: anunciante1@veraz.test / demo-anunciante-123')
+  console.log(`Seed listo. Moderación: admin@sigila.test / ${adminPw}`)
+  console.log('Cliente: cliente1@sigila.test / demo-cliente-123 · Anunciante: anunciante1@sigila.test / demo-anunciante-123')
 }
 
 main().finally(() => db.$disconnect())

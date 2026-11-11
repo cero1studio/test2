@@ -30,8 +30,8 @@ export const getUser = cache(async () => {
   if (!token) return null
   const session = await db.session.findUnique({ where: { id: sha(token) }, include: { user: true } })
   if (!session || session.expiresAt < new Date()) return null
-  const { id, email, role } = session.user
-  return { id, email, role }
+  const { id, email, role, handle } = session.user
+  return { id, email, role, handle }
 })
 
 export async function requireUser(role?: 'CLIENT' | 'ADVERTISER' | 'ADMIN') {

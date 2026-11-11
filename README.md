@@ -1,23 +1,34 @@
-# Veraz
+# Sigila
 
-Plataforma de anuncios para adultos pensada para resolver lo que falla en los clasificados
-tradicionales: estafas con anticipos, fotos falsas, reseñas inventadas y nula privacidad para
-quien anuncia. «Veraz» es un nombre provisional (se cambia en `src/lib/constants.ts`).
+**Discreta para ellas. Segura para ellos.** Plataforma de anuncios de acompañantes (mujeres, hombres y
+trans) para adultos, construida alrededor de dos necesidades: **privacidad** para quien anuncia y
+**seguridad** para quien busca. «Sigila» es un nombre de trabajo (se cambia en `src/lib/constants.ts`).
 
 ![Inicio](docs/inicio.png)
 
-## Qué resuelve y cómo
+## Qué la hace distinta
 
-| Problema | Solución implementada |
-| --- | --- |
-| Perfiles falsos y menores de edad | Nadie se publica sin verificación de identidad: documento + selfie con un código único. Un perfil solo es público si está activo **y** verificado. |
-| Fotos que no son de la persona | Cada foto pasa por moderación, que la compara con la selfie verificada. Insignia «Fotos reales». |
-| Reseñas inventadas | Solo se reseña con un código de un solo uso que la anunciante entrega al terminar el encuentro (vence en 7 días, máx. 5 por día, 1 reseña por cliente cada 30 días). |
-| Estafa del anticipo | Prohibido por reglas; aviso al revelar el contacto; cada reseña registra si pidieron anticipo y eso baja el índice de confianza. |
-| No saber en quién confiar | Índice de confianza 0-100 transparente y desglosado (`src/lib/trust.ts`). No se puede comprar. |
-| Privacidad de quien anuncia | Bloqueo de visibilidad por departamento o «fuera de Colombia» (listados, perfil, fotos y contacto). Se eliminan los metadatos EXIF/GPS de las fotos. El documento se borra al resolver la verificación. |
-| Copia masiva de teléfonos | El número no está en el HTML: se entrega bajo demanda con límite por IP. |
-| Explotación y trata | Denuncias anónimas; una denuncia grave de un usuario registrado oculta el perfil de inmediato; cola prioritaria en moderación; líneas oficiales en `/seguridad`. |
+### Encuentros verificados (reseñas imposibles de inventar)
+1. Durante el encuentro, la anunciante genera un **código QR presencial** de un solo uso (15 min).
+2. El cliente lo confirma desde su cuenta: queda registrado un encuentro con un **sello público** (`ENC-…`).
+3. **Ambos se califican a ciegas**: nada se publica hasta que los dos califican, o pasan 7 días.
+4. Cualquiera puede comprobar el sello en `/verificar` sin que se revele la identidad de nadie.
+
+El cliente elige si el texto de su reseña es público o **privado** (solo miembros con cuenta). La
+calificación y el sello siempre son visibles.
+
+### Privacidad para quien anuncia
+- **Modo discreto**: sin cuenta, las fotos se sirven difuminadas desde el servidor y el contacto queda oculto. El perfil no se envía a buscadores.
+- **Bloqueo por ubicación**: por departamento o «fuera de Colombia»; aplica a listados, perfil, fotos, contacto y sellos.
+- Documento de identidad **eliminado** al resolver la verificación; metadatos y GPS borrados de las fotos; marca de agua.
+- **Pase de cliente**: reputación agregada del cliente (respeto, pago, puntualidad) que él comparte antes del encuentro.
+
+### Seguridad para quien busca
+- Nadie se publica sin verificación de identidad y mayoría de edad; las fotos se comparan con una selfie verificada.
+- **Disponibilidad real**: «Disponible ahora» vence sola (1–8 h), más horario habitual y «activa hace…».
+- Índice de confianza 0–100 transparente (`src/lib/trust.ts`), que no se puede comprar y baja con anticipos o denuncias.
+- El número no está en el HTML: se entrega bajo demanda con límite por IP.
+- Denuncias: las graves ocultan el perfil de inmediato y van primero en la cola de moderación.
 
 ## Puesta en marcha
 
@@ -28,33 +39,36 @@ pnpm setup        # crea la base SQLite y carga datos de demostración
 pnpm dev          # http://localhost:3000
 ```
 
-Cuentas de demostración (las crea `pnpm db:seed`):
-
 | Rol | Correo | Contraseña |
 | --- | --- | --- |
-| Moderación | `admin@veraz.test` | valor de `SEED_ADMIN_PASSWORD` |
-| Cliente | `cliente1@veraz.test` | `demo-cliente-123` |
-| Anunciante | `anunciante1@veraz.test` | `demo-anunciante-123` |
+| Moderación | `admin@sigila.test` | valor de `SEED_ADMIN_PASSWORD` |
+| Cliente | `cliente1@sigila.test` | `demo-cliente-123` |
+| Anunciante | `anunciante1@sigila.test` | `demo-anunciante-123` |
 
-Los «retratos» de demostración son degradados generados; no hay fotos de personas reales.
-
-Otros comandos: `pnpm test` (pruebas unitarias), `pnpm typecheck`, `pnpm build`.
+Los retratos de demostración son ilustraciones generadas; no hay fotos de personas reales.
+Otros comandos: `pnpm test`, `pnpm typecheck`, `pnpm build`.
 
 ## Estructura
 
-- `prisma/schema.prisma`: modelo de datos (usuarios, perfiles, fotos, verificaciones, códigos, reseñas, denuncias).
-- `src/app/actions/`: toda la lógica de escritura (server actions) con validación y permisos.
-- `src/lib/trust.ts`: índice de confianza. `src/lib/geo.ts` y `regions.ts`: bloqueo por ubicación.
-- `src/lib/storage.ts`: archivos privados fuera de `/public`, servidos solo por rutas con permisos.
-- `src/app/panel`: panel de anunciante y cliente. `src/app/admin`: moderación.
+- `prisma/schema.prisma`: modelo de datos. `src/app/actions/`: toda la lógica de escritura, con validación y permisos.
+- `src/lib/`: confianza (`trust`), disponibilidad (`availability`), bloqueo por región (`geo`, `regions`), archivos privados (`storage`).
+- `src/app/panel`: cuenta de anunciante y de cliente. `src/app/admin`: moderación. `src/app/e`: confirmación de encuentro.
+- `src/app/prepagos/[ciudad]`, `sitemap.ts`, `robots.ts`: base de SEO.
+- Interfaz: Tailwind 4, Motion (animaciones), Fraunces + Geist, iconos Lucide.
+
+## Marco legal del diseño
+
+La plataforma **solo publica anuncios**: no agenda, no intermedia, no procesa pagos entre usuarios ni cobra
+comisión por los encuentros; exige mayoría de edad verificada y prohíbe administrar perfiles de terceros.
+Esto está reflejado en el producto y en los borradores de `/legal/terminos` y `/legal/privacidad`, que
+**deben ser revisados por un abogado** antes de lanzar (Ley 1581 de 2012, prevención de explotación sexual
+y trata, y la normativa de cada país donde opere).
 
 ## Pendiente antes de producción
 
-Esto es un MVP funcional, no un producto listo para lanzar. Falta:
-
-1. **Revisión legal** (habeas data / Ley 1581, términos, obligaciones frente a explotación sexual y trata, y la normativa de cada país donde opere).
-2. **Geolocalización**: el bloqueo por región lee las cabeceras del CDN (Vercel o Cloudflare). Sin un CDN que las fije, la región es desconocida y los perfiles con bloqueos se ocultan a todos. Es una barrera por IP: una VPN la evita.
-3. **Verificación con proveedor KYC** (prueba de vida y validación documental) en lugar de revisión solo manual.
-4. **PostgreSQL y almacenamiento cifrado** (S3 o similar) en vez de SQLite y disco local; limitador de peticiones en Redis.
-5. Verificación de correo y teléfono, recuperación de contraseña, 2FA para moderación y registro de auditoría.
-6. Modelo de ingresos (por ejemplo suscripción de anunciantes) que no altere el índice de confianza.
+1. Revisión legal y datos del responsable (razón social, NIT, canal de atención).
+2. **Geolocalización**: el bloqueo por región lee las cabeceras del CDN (Vercel o Cloudflare). Sin CDN, la región es desconocida y los perfiles con bloqueos se ocultan a todos. Una VPN lo evita.
+3. Proveedor de verificación de identidad con prueba de vida, en lugar de revisión solo manual.
+4. PostgreSQL, almacenamiento cifrado (S3 o similar) y limitador de peticiones en Redis.
+5. Verificación de correo y teléfono, recuperación de contraseña, 2FA para moderación, registro de auditoría.
+6. Modelo de ingresos (suscripción de anunciantes) que no altere el índice de confianza.

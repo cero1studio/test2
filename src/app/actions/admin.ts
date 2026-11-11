@@ -31,8 +31,7 @@ export async function reviewVerification(id: string, fd: FormData) {
       : []),
   ])
   // Minimización de datos: el documento nunca se conserva tras la revisión.
-  await deleteImage(v.docFile)
-  if (!approved) await deleteImage(v.selfieFile)
+  await deleteImage(v.docFile, approved ? null : v.selfieFile)
   revalidatePath('/admin')
 }
 
@@ -44,7 +43,7 @@ export async function reviewPhoto(id: string, approve: boolean) {
     await db.photo.update({ where: { id }, data: { status: 'APPROVED' } })
   } else {
     await db.photo.delete({ where: { id } })
-    await deleteImage(photo.file)
+    await deleteImage(photo.file, photo.blurFile)
   }
   revalidatePath('/admin')
 }
@@ -57,7 +56,7 @@ export async function resolveReport(id: string, outcome: 'dismiss' | 'suspend') 
     // Suspender cierra todas las denuncias abiertas del perfil.
     await db.$transaction([
       db.report.updateMany({ where: { profileId: report.profileId, status: 'OPEN' }, data: { status: 'RESOLVED' } }),
-      db.profile.update({ where: { id: report.profileId }, data: { status: 'SUSPENDED' } }),
+      db.profile.update({ where: { id: report.profileId }, data: { status: 'SUSPENDED', availableUntil: null } }),
     ])
   } else {
     await db.report.update({ where: { id }, data: { status: 'DISMISSED' } })

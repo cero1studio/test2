@@ -25,7 +25,7 @@ export function computeTrust(i: TrustInput): Trust {
   const parts: TrustPart[] = [
     { label: 'Identidad y mayoría de edad verificadas', points: i.identity ? 35 : 0, max: 35 },
     { label: 'Fotos verificadas contra selfie', points: i.photos ? 20 : 0, max: 20 },
-    { label: 'Cantidad de reseñas de encuentros reales', points: Math.round((Math.min(n, 10) / 10) * 15), max: 15 },
+    { label: 'Reseñas de encuentros verificados', points: Math.round((Math.min(n, 10) / 10) * 15), max: 15 },
     { label: 'Calificación promedio', points: n ? Math.round(clamp((avg - 3) / 2, 0, 1) * 10) : 0, max: 10 },
     { label: 'Clientes confirman que es la persona de las fotos', points: Math.round(matchRatio * 10), max: 10 },
     { label: 'Antigüedad del perfil', points: Math.round(clamp(months / 6, 0, 1) * 10), max: 10 },

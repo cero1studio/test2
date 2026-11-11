@@ -18,13 +18,33 @@ export const isBlockedIn = (p: { blockedRegions: string }, region: string | null
 export const isPublic = (p: { status: string; identityVerifiedAt: Date | null }) =>
   p.status === 'ACTIVE' && p.identityVerifiedAt !== null
 
-export const cardInclude = {
-  photos: { where: { status: 'APPROVED' }, orderBy: { createdAt: 'asc' } },
-  reviews: { where: { status: 'VISIBLE' }, select: { rating: true, photosMatch: true, askedDeposit: true } },
-  _count: { select: { reports: { where: { status: 'OPEN' } } } },
-} satisfies Prisma.ProfileInclude
+/**
+ * Calificación a ciegas: lo que una parte escribe solo se publica cuando la
+ * otra también calificó, o pasados 7 días. Así nadie califica por represalia.
+ */
+export const RELEASE_DAYS = 7
+export const RATE_WINDOW_DAYS = 14
+const releaseCutoff = () => new Date(Date.now() - RELEASE_DAYS * 864e5)
 
-export type CardProfile = Prisma.ProfileGetPayload<{ include: typeof cardInclude }>
+export const releasedReviewWhere = () =>
+  ({
+    status: 'VISIBLE',
+    OR: [{ encounter: { clientRating: { isNot: null } } }, { encounter: { confirmedAt: { lt: releaseCutoff() } } }],
+  }) satisfies Prisma.ReviewWhereInput
+
+export const releasedRatingWhere = () =>
+  ({
+    OR: [{ encounter: { review: { isNot: null } } }, { encounter: { confirmedAt: { lt: releaseCutoff() } } }],
+  }) satisfies Prisma.ClientRatingWhereInput
+
+export const cardInclude = () =>
+  ({
+    photos: { where: { status: 'APPROVED' }, orderBy: { createdAt: 'asc' } },
+    reviews: { where: releasedReviewWhere(), select: { rating: true, photosMatch: true, askedDeposit: true } },
+    _count: { select: { reports: { where: { status: 'OPEN' } }, encounters: { where: { confirmedAt: { not: null } } } } },
+  }) satisfies Prisma.ProfileInclude
+
+export type CardProfile = Prisma.ProfileGetPayload<{ include: ReturnType<typeof cardInclude> }>
 
 export const trustOf = (p: CardProfile) =>
   computeTrust({

@@ -2,12 +2,13 @@
 
 import { cookies } from 'next/headers'
 import { revalidatePath } from 'next/cache'
+import { redirect } from 'next/navigation'
 import { z } from 'zod'
 import { getUser } from '@/lib/auth'
 import { REPORT_REASONS, type ActionState } from '@/lib/constants'
 import { db } from '@/lib/db'
 import { viewerRegion } from '@/lib/geo'
-import { isBlockedIn, isPublic } from '@/lib/profiles'
+import { isBlockedIn, isPublic, RATE_WINDOW_DAYS } from '@/lib/profiles'
 import { clientIp, rateLimit } from '@/lib/rate-limit'
 
 export async function confirmAge() {
@@ -16,11 +17,10 @@ export async function confirmAge() {
 
 /** El número no viaja en el HTML: se entrega bajo demanda y con límite por IP. */
 export async function revealContact(profileId: string): Promise<{ whatsapp?: string; error?: string }> {
-  if (!rateLimit(`contact:${await clientIp()}`, 15, 60 * 60_000)) {
-    return { error: 'Has consultado muchos contactos. Intenta más tarde.' }
-  }
+  if (!rateLimit(`contact:${await clientIp()}`, 15, 60 * 60_000)) return { error: 'Has consultado muchos contactos. Intenta más tarde.' }
   const p = await db.profile.findUnique({ where: { id: profileId } })
   if (!p || !isPublic(p) || isBlockedIn(p, await viewerRegion())) return { error: 'Perfil no disponible.' }
+  if (p.discreet && !(await getUser())) return { error: 'Este perfil solo comparte su contacto con miembros. Crea una cuenta gratis.' }
   return { whatsapp: p.whatsapp.replace(/^\+/, '') }
 }
 
@@ -57,43 +57,58 @@ export async function submitReport(profileId: string, _: ActionState, fd: FormDa
   return { ok: 'Denuncia recibida. Moderación la revisará; tu identidad no se comparte con el perfil.' }
 }
 
+const normalizeCode = (v: unknown) => String(v ?? '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
+
+export async function goToEncounter(fd: FormData) {
+  redirect(`/e/${normalizeCode(fd.get('code')) || '0'}`)
+}
+
+/** El cliente confirma en persona el código que le muestra la anunciante. */
+export async function confirmEncounter(rawCode: string, _: ActionState, __: FormData): Promise<ActionState> {
+  const user = await getUser()
+  if (!user || user.role !== 'CLIENT') return { error: 'Ingresa con una cuenta de cliente para confirmar.' }
+  if (!rateLimit(`enc:${user.id}`, 10, 60 * 60_000)) return { error: 'Demasiados intentos. Prueba más tarde.' }
+  const enc = await db.encounter.findUnique({ where: { code: normalizeCode(rawCode) } })
+  if (!enc || enc.clientId || enc.expiresAt < new Date()) return { error: 'El código no existe, ya se usó o venció. Pide uno nuevo.' }
+  const recent = await db.encounter.findFirst({
+    where: { profileId: enc.profileId, clientId: user.id, confirmedAt: { gt: new Date(Date.now() - 7 * 864e5) } },
+  })
+  if (recent) return { error: 'Ya registraste un encuentro con este perfil en los últimos 7 días.' }
+  const claimed = await db.encounter.updateMany({
+    where: { id: enc.id, clientId: null },
+    data: { clientId: user.id, confirmedAt: new Date() },
+  })
+  if (claimed.count !== 1) return { error: 'El código ya fue usado.' }
+  revalidatePath('/panel')
+  redirect('/panel?encuentro=ok')
+}
+
 const reviewSchema = z.object({
-  code: z.string().trim().toUpperCase().regex(/^[A-Z0-9]{4}-[A-Z0-9]{4}$/, 'Código inválido.'),
   rating: z.coerce.number().int().min(1).max(5),
   body: z.string().trim().min(20, 'Escribe al menos 20 caracteres.').max(1500),
 })
 
-export async function submitReview(_: ActionState, fd: FormData): Promise<ActionState> {
+export async function submitReview(encounterId: string, _: ActionState, fd: FormData): Promise<ActionState> {
   const user = await getUser()
   if (!user || user.role !== 'CLIENT') return { error: 'Solo las cuentas de cliente pueden reseñar.' }
-  if (!rateLimit(`review:${user.id}`, 10, 60 * 60_000)) return { error: 'Demasiados intentos. Prueba más tarde.' }
   const parsed = reviewSchema.safeParse(Object.fromEntries(fd))
   if (!parsed.success) return { error: parsed.error.issues[0].message }
-  const { code, rating, body } = parsed.data
-
-  const rc = await db.reviewCode.findUnique({ where: { code }, include: { profile: true } })
-  if (!rc || rc.usedAt || rc.expiresAt < new Date()) return { error: 'El código no existe, ya se usó o venció.' }
-  const recent = await db.review.findFirst({
-    where: { profileId: rc.profileId, authorId: user.id, createdAt: { gt: new Date(Date.now() - 30 * 864e5) } },
+  const enc = await db.encounter.findFirst({
+    where: {
+      id: encounterId, clientId: user.id, review: null,
+      confirmedAt: { gt: new Date(Date.now() - RATE_WINDOW_DAYS * 864e5) },
+    },
+    include: { profile: true },
   })
-  if (recent) return { error: 'Ya reseñaste este perfil en los últimos 30 días.' }
-
-  try {
-    await db.$transaction(async (tx) => {
-      const claimed = await tx.reviewCode.updateMany({ where: { id: rc.id, usedAt: null }, data: { usedAt: new Date() } })
-      if (claimed.count !== 1) throw new Error('used')
-      await tx.review.create({
-        data: {
-          profileId: rc.profileId, authorId: user.id, codeId: rc.id, rating, body,
-          photosMatch: fd.get('photosMatch') === 'on',
-          askedDeposit: fd.get('askedDeposit') === 'on',
-        },
-      })
-    })
-  } catch {
-    return { error: 'El código ya fue usado.' }
-  }
-  revalidatePath(`/p/${rc.profile.slug}`)
-  revalidatePath('/panel')
-  return { ok: `Reseña publicada en el perfil de ${rc.profile.displayName}. Gracias por ayudar a la comunidad.` }
+  if (!enc) return { error: 'Este encuentro ya no se puede reseñar.' }
+  await db.review.create({
+    data: {
+      encounterId: enc.id, profileId: enc.profileId, authorId: user.id, ...parsed.data,
+      photosMatch: fd.get('photosMatch') === 'on',
+      askedDeposit: fd.get('askedDeposit') === 'on',
+      visibility: fd.get('visibility') === 'PUBLIC' ? 'PUBLIC' : 'MEMBERS',
+    },
+  })
+  // Se redirige porque el formulario desaparece al guardar: el aviso vive en el panel.
+  redirect(`/panel?sello=${enc.publicId}`)
 }

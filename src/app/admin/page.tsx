@@ -5,7 +5,7 @@ import { requireUser } from '@/lib/auth'
 import { dateFormat, REPORT_REASONS } from '@/lib/constants'
 import { db } from '@/lib/db'
 
-export const metadata: Metadata = { title: 'Moderación' }
+export const metadata: Metadata = { title: 'Moderación', robots: { index: false } }
 
 const reason = (key: string) => REPORT_REASONS.find((r) => r.key === key)
 
@@ -22,50 +22,51 @@ export default async function Admin() {
   reports.sort((a, b) => Number(!!reason(b.reason)?.severe) - Number(!!reason(a.reason)?.severe))
 
   return (
-    <div className="container-page space-y-10 py-8">
-      <h1 className="text-3xl font-black">Moderación</h1>
+    <div className="container-page space-y-12 py-10">
+      <header className="space-y-2"><p className="eyebrow">Panel interno</p><h1 className="display text-4xl">Moderación</h1></header>
 
-      <section className="space-y-3">
+      <section className="space-y-4">
         <h2 className="h-section">Denuncias abiertas ({reports.length})</h2>
         {reports.length === 0 && <p className="card text-sm text-mute">Sin denuncias pendientes.</p>}
         {reports.map((r) => (
-          <article key={r.id} className={`card space-y-2 ${reason(r.reason)?.severe ? 'border-rose' : ''}`}>
+          <article key={r.id} className={`card space-y-3 ${reason(r.reason)?.severe ? 'border-rose/60' : ''}`}>
             <div className="flex flex-wrap items-center gap-2 text-sm">
-              {reason(r.reason)?.severe && <span className="badge border-rose bg-rose/10 text-rose">PRIORITARIA</span>}
+              {reason(r.reason)?.severe && <span className="chip chip-rose">PRIORITARIA</span>}
               <strong>{reason(r.reason)?.label ?? r.reason}</strong>
-              <Link href={`/p/${r.profile.slug}`} className="text-rose underline">{r.profile.displayName}</Link>
-              <span className="badge badge-mute">{r.profile.status}</span>
+              <Link href={`/p/${r.profile.slug}`} className="text-rose hover:underline">{r.profile.displayName}</Link>
+              <span className="chip">{r.profile.status}</span>
               <span className="ml-auto text-xs text-mute">{dateFormat.format(r.createdAt)} · {r.reporterId ? 'usuario registrado' : 'anónima'}</span>
             </div>
-            <p className="text-sm text-zinc-300">{r.details}</p>
+            <p className="text-sm text-cream/85">{r.details}</p>
             <div className="flex gap-2">
-              <form action={resolveReport.bind(null, r.id, 'suspend')}><button className="btn btn-primary">Suspender perfil</button></form>
-              <form action={resolveReport.bind(null, r.id, 'dismiss')}><button className="btn">Descartar</button></form>
+              <form action={resolveReport.bind(null, r.id, 'suspend')}><button className="btn btn-primary btn-sm">Suspender perfil</button></form>
+              <form action={resolveReport.bind(null, r.id, 'dismiss')}><button className="btn btn-sm">Descartar</button></form>
             </div>
           </article>
         ))}
       </section>
 
-      <section className="space-y-3">
+      <section className="space-y-4">
         <h2 className="h-section">Verificaciones de identidad ({verifications.length})</h2>
         {verifications.length === 0 && <p className="card text-sm text-mute">Sin solicitudes pendientes.</p>}
         {verifications.map((v) => (
-          <article key={v.id} className="card grid gap-4 md:grid-cols-[1fr_1fr_18rem]">
+          <article key={v.id} className="card grid gap-5 md:grid-cols-[1fr_1fr_18rem]">
             {(['doc', 'selfie'] as const).map((t) => (
               <figure key={t}>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={`/admin/archivo/${v.id}?t=${t}`} alt={t === 'doc' ? 'Documento' : 'Selfie con código'} className="max-h-80 w-full rounded-lg border border-line object-contain" />
-                <figcaption className="mt-1 text-xs text-mute">{t === 'doc' ? 'Documento' : 'Selfie con código'}</figcaption>
+                <img src={`/admin/archivo/${v.id}?t=${t}`} alt={t === 'doc' ? 'Documento' : 'Selfie con código'} className="max-h-80 w-full rounded-2xl border border-white/8 object-contain" />
+                <figcaption className="mt-1.5 text-xs text-mute">{t === 'doc' ? 'Documento' : 'Selfie con código'}</figcaption>
               </figure>
             ))}
             <form action={reviewVerification.bind(null, v.id)} className="space-y-3 text-sm">
-              <p><Link href={`/p/${v.profile.slug}`} className="font-bold text-rose underline">{v.profile.displayName}</Link> · declara {v.profile.age} años</p>
+              <p><Link href={`/p/${v.profile.slug}`} className="font-semibold text-rose hover:underline">{v.profile.displayName}</Link> · declara {v.profile.age} años</p>
               <p>Código esperado: <strong className="font-mono">{v.code}</strong></p>
               <ul className="list-disc space-y-1 pl-5 text-xs text-mute">
                 <li>El documento es auténtico y confirma 18 años o más.</li>
                 <li>El rostro de la selfie coincide con el del documento.</li>
                 <li>El código y una fecha reciente se leen en el papel.</li>
                 <li>Las fotos públicas muestran a la misma persona (para «fotos reales»).</li>
+                <li>No hay señales de coacción ni de que un tercero controle la cuenta.</li>
               </ul>
               <select name="decision" className="input" required defaultValue="">
                 <option value="" disabled>Decisión…</option>
@@ -80,23 +81,23 @@ export default async function Admin() {
         ))}
       </section>
 
-      <section className="space-y-3">
+      <section className="space-y-4">
         <h2 className="h-section">Fotos por aprobar ({photos.length})</h2>
         {photos.length === 0 && <p className="card text-sm text-mute">Sin fotos pendientes.</p>}
         <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
           {photos.map((ph) => {
             const ref = ph.profile.verifications[0]
             return (
-              <div key={ph.id} className="card space-y-2 p-3 text-sm">
+              <div key={ph.id} className="card space-y-2.5 p-3 text-sm">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={`/media/${ph.id}`} alt="" className="aspect-[4/5] w-full rounded-lg object-cover" />
+                <img src={`/media/${ph.id}`} alt="" className="aspect-[4/5] w-full rounded-2xl object-cover" />
                 <p className="truncate font-semibold">{ph.profile.displayName}</p>
                 {ref?.selfieFile
-                  ? <a href={`/admin/archivo/${ref.id}?t=selfie`} target="_blank" className="text-xs text-rose underline">Comparar con selfie verificada</a>
-                  : <p className="text-xs text-warn">Sin selfie de referencia</p>}
+                  ? <a href={`/admin/archivo/${ref.id}?t=selfie`} target="_blank" className="text-xs text-rose hover:underline">Comparar con selfie verificada</a>
+                  : <p className="text-xs text-amber">Sin selfie de referencia</p>}
                 <div className="flex gap-2">
-                  <form action={reviewPhoto.bind(null, ph.id, true)} className="flex-1"><button className="btn btn-ok w-full">Aprobar</button></form>
-                  <form action={reviewPhoto.bind(null, ph.id, false)} className="flex-1"><button className="btn w-full">Rechazar</button></form>
+                  <form action={reviewPhoto.bind(null, ph.id, true)} className="flex-1"><button className="btn btn-primary btn-sm w-full">Aprobar</button></form>
+                  <form action={reviewPhoto.bind(null, ph.id, false)} className="flex-1"><button className="btn btn-sm w-full">Rechazar</button></form>
                 </div>
               </div>
             )
